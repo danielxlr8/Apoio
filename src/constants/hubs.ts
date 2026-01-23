@@ -7,12 +7,10 @@ export const HUBS = [
 
 export type Hub = (typeof HUBS)[number];
 
-// --- ADICIONE ESTA PARTE ABAIXO ---
-
 export const getCityFromHub = (hubName: string) => {
   if (!hubName) return "";
 
-  // O padrão parece ser: "LM Hub" _ "UF" _ "CIDADE" _ "DETALHE"
+  // padrão  "LM Hub" _ "UF" _ "CIDADE" _ "DETALHE"
   const parts = hubName.split("_");
 
   // Se tiver pelo menos 3 partes, a cidade é a terceira parte (índice 2)

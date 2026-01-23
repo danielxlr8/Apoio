@@ -26,7 +26,6 @@ import type {
   SupportCall as OriginalSupportCall,
   Driver,
 } from "./types/logistics";
-import { useSafeFirestore } from "./hooks/useSafeFirestore";
 import { useFirestoreQuery, clearCollectionCache } from "./hooks/useFirestoreQuery";
 import { usePresence } from "./hooks/usePresence";
 import { checkAccessPermission } from "./services/gatekeeper";
@@ -67,11 +66,6 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [isAdminUnverified, setIsAdminUnverified] = useState(false);
 
-  // ========================================
-  // NOVA IMPLEMENTAÇÃO COM useFirestoreQuery (SIMPLIFICADO)
-  // ========================================
-  
-  // Hook para chamados - simples e rápido
   const {
     data: calls,
     loading: callsLoading,
@@ -79,14 +73,13 @@ function App() {
     refresh: refreshCalls,
   } = useFirestoreQuery<SupportCall>({
     collectionName: "supportCalls",
-    orderByField: "createdAt",
+    orderByField: "timestamp", // CORREÇÃO BUG 1: Usar timestamp em vez de createdAt
     orderDirection: "desc",
     limitCount: 100,
     enableCache: true,
-    cacheDuration: 2 * 60 * 1000, // 2 minutos
+    cacheDuration: 2 * 60 * 1000,
   });
 
-  // Hook para motoristas - simples e rápido
   const {
     data: drivers,
     loading: driversLoading,
@@ -98,26 +91,20 @@ function App() {
     orderDirection: "asc",
     limitCount: 200,
     enableCache: true,
-    cacheDuration: 5 * 60 * 1000, // 5 minutos
+    cacheDuration: 5 * 60 * 1000,
   });
 
-  // ========================================
-  // ATIVA PRESENÇA DO USUÁRIO (para contador online)
-  // ========================================
   usePresence(
     user?.uid || null,
     userData?.role || "driver",
     userData ? { name: userData.name, email: userData.email } : null,
-    !!user && !!userData // Só ativa se usuário estiver logado
+    !!user && !!userData
   );
 
   useEffect(() => {
-    console.log("🔹 Iniciando useEffect de autenticação");
-    
-    // Timeout de segurança: se após 15 segundos ainda estiver carregando, exibe erro
     const safetyTimeout = setTimeout(() => {
       if (loading) {
-        console.error("⚠️ Timeout de segurança atingido. Forçando fim do carregamento.");
+        console.error("Authentication timeout reached");
         setLoading(false);
         setUser(null);
         setUserData(null);
@@ -125,121 +112,104 @@ function App() {
     }, 15000);
 
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      console.log("🔹 onAuthStateChanged disparado", currentUser ? "COM usuário" : "SEM usuário");
       try {
         setIsAdminUnverified(false);
 
         if (currentUser) {
-          console.log("🔹 Recarregando dados do usuário...");
           await currentUser.reload();
 
-          // ========================================
-          // GATEKEEPER: Verificação de limite de usuários simultâneos
-          // ========================================
-          console.log("🔹 Verificando gatekeeper...");
           const accessCheck = await Promise.race([
             checkAccessPermission(currentUser.email || undefined),
             new Promise<any>((resolve) => 
               setTimeout(() => {
-                console.warn("⏱️ Timeout no gatekeeper, permitindo acesso");
+                console.warn("Gatekeeper timeout, allowing access");
                 resolve({ allowed: true });
               }, 5000)
             )
           ]);
 
-          console.log("🔹 Resultado do gatekeeper:", accessCheck);
+          if (!accessCheck.allowed) {
+            sonnerToast.error("Servidor Cheio", {
+              description: accessCheck.reason || "Tente novamente em instantes.",
+              duration: 5000,
+            });
 
-        if (!accessCheck.allowed) {
-          // Servidor cheio - mostra notificação e faz logout
-          sonnerToast.error("Servidor Cheio", {
-            description: accessCheck.reason || "Tente novamente em instantes.",
-            duration: 5000,
-          });
+            console.warn("Access denied - Server full", {
+              currentCount: accessCheck.currentCount,
+              maxCount: accessCheck.maxCount,
+            });
 
-          console.warn("⛔ Acesso negado - Servidor cheio:", {
-            currentCount: accessCheck.currentCount,
-            maxCount: accessCheck.maxCount,
-          });
-
-          await signOut(auth);
-          setLoading(false);
-          return;
-        }
-
-        console.log("✅ Acesso permitido via Gatekeeper:", {
-          currentCount: accessCheck.currentCount,
-          maxCount: accessCheck.maxCount,
-        });
-
-        console.log("🔹 Começando a buscar dados do usuário...");
-        let resolvedUserData: UserData | null = null;
-
-        if (currentUser.email?.endsWith("@shopee.com")) {
-          if (!currentUser.emailVerified) {
-            setUser(currentUser);
-            setIsAdminUnverified(true);
+            await signOut(auth);
             setLoading(false);
             return;
           }
 
-          const adminDocRef = doc(db, "admins_pre_aprovados", currentUser.uid);
-          const adminDocSnap = await getDoc(adminDocRef);
+          let resolvedUserData: UserData | null = null;
 
-          if (adminDocSnap.exists()) {
-            resolvedUserData = adminDocSnap.data() as UserData;
+          if (currentUser.email?.endsWith("@shopee.com")) {
+            if (!currentUser.emailVerified) {
+              setUser(currentUser);
+              setIsAdminUnverified(true);
+              setLoading(false);
+              return;
+            }
+
+            const adminDocRef = doc(db, "admins_pre_aprovados", currentUser.uid);
+            const adminDocSnap = await getDoc(adminDocRef);
+
+            if (adminDocSnap.exists()) {
+              resolvedUserData = adminDocSnap.data() as UserData;
+            } else {
+              const newAdminData: UserData = {
+                uid: currentUser.uid,
+                email: currentUser.email!,
+                name: currentUser.displayName || "Admin Shopee",
+                role: "admin",
+              };
+              await setDoc(adminDocRef, newAdminData);
+              resolvedUserData = newAdminData;
+            }
           } else {
-            const newAdminData: UserData = {
-              uid: currentUser.uid,
-              email: currentUser.email!,
-              name: currentUser.displayName || "Admin Shopee",
-              role: "admin",
-            };
-            await setDoc(adminDocRef, newAdminData);
-            resolvedUserData = newAdminData;
+            const driversRef = collection(db, "motoristas_pre_aprovados");
+            const qUid = query(driversRef, where("uid", "==", currentUser.uid));
+            const qGoogleUid = query(
+              driversRef,
+              where("googleUid", "==", currentUser.uid)
+            );
+
+            const [uidSnapshot, googleUidSnapshot] = await Promise.all([
+              getDocs(qUid),
+              getDocs(qGoogleUid),
+            ]);
+
+            const driverDoc = uidSnapshot.docs[0] || googleUidSnapshot.docs[0];
+
+            if (driverDoc && driverDoc.exists()) {
+              const driverData = driverDoc.data() as Driver;
+              resolvedUserData = {
+                uid: currentUser.uid,
+                email: currentUser.email!,
+                name: driverData.name,
+                role: "driver",
+              };
+            }
           }
-        } else {
-          const driversRef = collection(db, "motoristas_pre_aprovados");
-          const qUid = query(driversRef, where("uid", "==", currentUser.uid));
-          const qGoogleUid = query(
-            driversRef,
-            where("googleUid", "==", currentUser.uid)
-          );
 
-          const [uidSnapshot, googleUidSnapshot] = await Promise.all([
-            getDocs(qUid),
-            getDocs(qGoogleUid),
-          ]);
-
-          const driverDoc = uidSnapshot.docs[0] || googleUidSnapshot.docs[0];
-
-          if (driverDoc && driverDoc.exists()) {
-            const driverData = driverDoc.data() as Driver;
-            resolvedUserData = {
-              uid: currentUser.uid,
-              email: currentUser.email!,
-              name: driverData.name,
-              role: "driver",
-            };
+          if (resolvedUserData) {
+            setUserData(resolvedUserData);
+            setUser(currentUser);
+          } else {
+            console.error("User not found or unauthorized");
+            if (!isAdminUnverified) {
+              await signOut(auth);
+            }
           }
-        }
-
-        if (resolvedUserData) {
-          setUserData(resolvedUserData);
-          setUser(currentUser);
-        } else {
-          console.error(
-            "Usuário não encontrado ou não autorizado. Fazendo logout."
-          );
-          if (!isAdminUnverified) {
-            await signOut(auth);
-          }
-        }
         } else {
           setUser(null);
           setUserData(null);
         }
       } catch (error) {
-        console.error("❌ Erro durante autenticação:", error);
+        console.error("Authentication error:", error);
         setUser(null);
         setUserData(null);
       } finally {
@@ -261,11 +231,10 @@ function App() {
     const callDocRef = doc(db, "supportCalls", id);
     try {
       await updateDoc(callDocRef, updates);
-      // Limpa cache e recarrega
       clearCollectionCache("supportCalls");
       refreshCalls();
     } catch (error) {
-      console.error("Erro ao atualizar chamado: ", error);
+      console.error("Error updating call:", error);
     }
   };
 
@@ -280,11 +249,10 @@ function App() {
     const callDocRef = doc(db, "supportCalls", id);
     try {
       await deleteDoc(callDocRef);
-      // Limpa cache e recarrega
       clearCollectionCache("supportCalls");
       refreshCalls();
     } catch (error) {
-      console.error("Erro ao excluir chamado permanentemente: ", error);
+      console.error("Error permanently deleting call:", error);
     }
   };
 
@@ -298,11 +266,10 @@ function App() {
     querySnapshot.forEach((doc) => batch.delete(doc.ref));
     try {
       await batch.commit();
-      // Limpa cache e recarrega
       clearCollectionCache("supportCalls");
       refreshCalls();
     } catch (error) {
-      console.error("Erro ao limpar chamados excluídos: ", error);
+      console.error("Error clearing excluded calls:", error);
     }
   };
 
@@ -319,7 +286,6 @@ function App() {
       return <AuthPage />;
     }
 
-    // Exibe erros se houver
     if (callsError || driversError) {
       return (
         <div className="flex flex-col items-center justify-center min-h-screen gap-4 p-4">

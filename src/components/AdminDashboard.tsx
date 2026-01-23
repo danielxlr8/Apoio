@@ -185,7 +185,7 @@ const SortableItem = ({
 const showNotification = (
   type: "success" | "error" | "warning" | "info",
   title: string,
-  message: string
+  message: string,
 ) => {
   const styles = {
     success: { icon: CheckCircle, color: "text-green-600", bg: "bg-green-100" },
@@ -222,14 +222,14 @@ const showNotification = (
 const handleContactDriver = (phone: string | undefined) => {
   if (phone) {
     const message = encodeURIComponent(
-      `Olá, estou entrando em contato referente a um chamado de apoio.`
+      `Olá, estou entrando em contato referente a um chamado de apoio.`,
     );
     window.open(`https://wa.me/55${phone}?text=${message}`, "_blank");
   } else {
     showNotification(
       "error",
       "Contato Indisponível",
-      "O número de telefone deste motorista não está cadastrado."
+      "O número de telefone deste motorista não está cadastrado.",
     );
   }
 };
@@ -335,12 +335,12 @@ const SearchableSelect = ({
   const filteredOptions = useMemo(() => {
     const lowerSearch = searchTerm.toLowerCase();
     const allOption = options.find((option) =>
-      option.toLowerCase().startsWith("todos")
+      option.toLowerCase().startsWith("todos"),
     );
     const filtered = options.filter(
       (option) =>
         option.toLowerCase().includes(lowerSearch) &&
-        !option.toLowerCase().startsWith("todos")
+        !option.toLowerCase().startsWith("todos"),
     );
     return allOption ? [allOption, ...filtered] : filtered;
   }, [options, searchTerm]);
@@ -385,7 +385,7 @@ const SearchableSelect = ({
             if (!isOpen) setIsOpen(true);
             if (e.target.value === "") {
               const allOption = options.find((opt) =>
-                opt.toLowerCase().startsWith("todos")
+                opt.toLowerCase().startsWith("todos"),
               );
               if (allOption) onChange(allOption);
             }
@@ -413,12 +413,15 @@ const SearchableSelect = ({
                   onClick={() => handleSelect(option)}
                   className={cn(
                     "px-4 py-3 hover:bg-slate-700/90 cursor-pointer transition-colors flex items-center justify-between",
-                    value === option && "bg-orange-500/10"
+                    value === option && "bg-orange-500/10",
                   )}
                 >
                   <span className="text-slate-200">{option}</span>
                   {value === option && (
-                    <CheckCircle size={16} className="text-orange-500 flex-shrink-0" />
+                    <CheckCircle
+                      size={16}
+                      className="text-orange-500 flex-shrink-0"
+                    />
                   )}
                 </li>
               ))
@@ -514,7 +517,7 @@ const CallDetailsModal = ({
   onClose: () => void;
   onUpdateStatus: (
     id: string,
-    updates: Partial<Omit<SupportCall, "id">>
+    updates: Partial<Omit<SupportCall, "id">>,
   ) => void;
 }) => {
   if (!call) return null;
@@ -579,7 +582,7 @@ const CallDetailsModal = ({
 
           <p
             className={`font-bold text-sm uppercase ${getStatusColor(
-              call.status
+              call.status,
             )}`}
           >
             {call.status.replace("_", " ")}
@@ -758,7 +761,7 @@ const CallCard = ({
       className={cn(
         "bg-card p-3 rounded-md shadow-sm border border-border hover:shadow-md transition-all cursor-pointer group relative flex flex-col gap-2",
         "border-l-4",
-        urgencyColor
+        urgencyColor,
       )}
       onClick={() => onClick(call)}
     >
@@ -831,7 +834,7 @@ const CallCard = ({
                 showNotification(
                   "error",
                   "Erro",
-                  "Localização não disponível para este chamado."
+                  "Localização não disponível para este chamado.",
                 );
             }}
             className="p-1.5 rounded hover:bg-blue-100 text-blue-600 transition-colors"
@@ -1057,15 +1060,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     whatsapp: "",
     hub: "",
   });
-  
+
   // Estados para customização do card
   const [cardColors, setCardColors] = useState({
     mainColor: "#000000",
     gradientColor: "#1a1a1a",
   });
-  
+
   // Estado para previsão do tempo
-  const [selectedWeatherDay, setSelectedWeatherDay] = useState<string | null>(null);
+  const [selectedWeatherDay, setSelectedWeatherDay] = useState<string | null>(
+    null,
+  );
   const [isLoadingProfile, setIsLoadingProfile] = useState(true);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
@@ -1092,7 +1097,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           email: currentUser.email || "",
         }
       : null,
-    true // Sempre ativo para admins
+    true, // Sempre ativo para admins
   );
 
   // Atualizar data/hora do Brasil
@@ -1100,7 +1105,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const updateDateTime = () => {
       // Fuso horário do Brasil (America/Sao_Paulo)
       const brazilTime = new Date(
-        new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" })
+        new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }),
       );
       setCurrentDateTime(brazilTime);
     };
@@ -1171,7 +1176,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             hub: data.hub || "",
           });
           setAvatarPreview(data.avatar || null);
-          
+
           // Carregar cores do card
           if (data.cardMainColor && data.cardGradientColor) {
             setCardColors({
@@ -1255,7 +1260,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setIsUploadingAvatar(true);
       const photoRef = ref(
         storage,
-        `admin-avatars/${user.uid}/${Date.now()}_${file.name}`
+        `admin-avatars/${user.uid}/${Date.now()}_${file.name}`,
       );
       await uploadBytesResumable(photoRef, file);
       const photoURL = await getDownloadURL(photoRef);
@@ -1326,7 +1331,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   const [urgencyFilter, setUrgencyFilter] = useState<UrgencyLevel | "TODOS">(
-    "TODOS"
+    "TODOS",
   );
 
   const [infoModalDriver, setInfoModalDriver] = useState<Driver | null>(null);
@@ -1362,7 +1367,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // --- CONFIGURAÇÃO DE COLUNAS (Drag & Drop) ---
   const [columns, setColumns] = useState<ColumnConfig[]>([
-    { id: "abertos", label: "Abertos", isVisible: true, colorClass: "#F59E0B" },
+    {
+      id: "abertos",
+      label: "Abertos",
+      isVisible: true,
+      colorClass: "#F59E0B",
+    },
     {
       id: "em_andamento",
       label: "Em Andamento",
@@ -1397,7 +1407,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const sensors = useSensors(
     useSensor(PointerSensor),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
   );
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -1414,14 +1426,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const toggleColumn = (id: string) => {
     setColumns((prev) =>
       prev.map((col) =>
-        col.id === id ? { ...col, isVisible: !col.isVisible } : col
-      )
+        col.id === id ? { ...col, isVisible: !col.isVisible } : col,
+      ),
     );
   };
 
   const updateDriver = async (
     driverUid: string,
-    updates: Partial<Omit<Driver, "uid">>
+    updates: Partial<Omit<Driver, "uid">>,
   ) => {
     if (!driverUid) return;
     const driverDocRef = doc(db, "motoristas_pre_aprovados", driverUid);
@@ -1433,13 +1445,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     showNotification(
       "info",
       "Filtros Aplicados",
-      "Os filtros do histórico foram atualizados com sucesso."
+      "Os filtros do histórico foram atualizados com sucesso.",
     );
   };
 
   const handleHistoryFilterChange = (
     filterName: keyof typeof tempHistoryFilters,
-    value: string
+    value: string,
   ) => {
     setTempHistoryFilters((prev) => ({ ...prev, [filterName]: value }));
   };
@@ -1456,7 +1468,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     showNotification(
       "info",
       newMutedState ? "Silenciado" : "Som Ativado",
-      newMutedState ? "Notificações silenciadas." : "Alertas sonoros ativos."
+      newMutedState ? "Notificações silenciadas." : "Alertas sonoros ativos.",
     );
   };
 
@@ -1485,7 +1497,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           const escalationLevels = Math.floor(minutesElapsed / 30);
           const newUrgencyIndex = Math.min(
             initialUrgencyIndex + escalationLevels,
-            urgencyLevels.length - 1
+            urgencyLevels.length - 1,
           );
           if (urgencyLevels[newUrgencyIndex] !== call.urgency) {
             updateCall(call.id, { urgency: urgencyLevels[newUrgencyIndex] });
@@ -1502,7 +1514,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
       calls
         .filter(
-          (call) => !["ARQUIVADO", "EXCLUIDO", "ABERTO"].includes(call.status)
+          (call) => !["ARQUIVADO", "EXCLUIDO", "ABERTO"].includes(call.status),
         )
         .forEach((call) => {
           if (call.timestamp) {
@@ -1523,7 +1535,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   useEffect(() => {
     const prevCallsMap = new Map(
-      prevCallsRef.current.map((c) => [c.id, c.status])
+      prevCallsRef.current.map((c) => [c.id, c.status]),
     );
     const newOpenCalls = calls.filter((call) => {
       const prevStatus = prevCallsMap.get(call.id);
@@ -1543,14 +1555,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         showNotification(
           "warning",
           "Novo Chamado!",
-          `${newCall.solicitante.name} precisa de apoio.`
+          `${newCall.solicitante.name} precisa de apoio.`,
         );
         notifiedCallIds.current.add(newCall.id);
       });
     }
     prevCallsRef.current = calls;
     const openCallIds = new Set(
-      calls.filter((c) => c.status === "ABERTO").map((c) => c.id)
+      calls.filter((c) => c.status === "ABERTO").map((c) => c.id),
     );
     notifiedCallIds.current.forEach((id) => {
       if (!openCallIds.has(id)) notifiedCallIds.current.delete(id);
@@ -1577,7 +1589,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       showNotification(
         "warning",
         "Rejeitado",
-        "Chamado voltou para Em Andamento."
+        "Chamado voltou para Em Andamento.",
       );
     } catch (error) {
       showNotification("error", "Erro", "Falha ao rejeitar.");
@@ -1609,7 +1621,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       showNotification(
         "success",
         "Excluído",
-        "Chamado excluído permanentemente."
+        "Chamado excluído permanentemente.",
       );
     } else if (confirmationType === "clear-all") {
       onDeleteAllExcluded();
@@ -1623,47 +1635,53 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     showNotification("success", "Restaurado", "Chamado voltou para Abertos.");
   };
 
-  const filteredCalls = useMemo(
-    () => calls,
-    [calls]
-  );
+  const filteredCalls = useMemo(() => {
+    // CORREÇÃO: Filtrar chamados pelo Hub do admin
+    const profileHub = adminProfile.hub;
+    if (
+      !profileHub ||
+      profileHub === "Todos" ||
+      profileHub === "Todos os Hubs"
+    ) {
+      return calls;
+    }
+    return calls.filter((call) => call.hub === profileHub);
+  }, [calls, adminProfile.hub]);
+
   const activeCalls = useMemo(
     () =>
       filteredCalls.filter(
-        (c) => !["EXCLUIDO", "ARQUIVADO"].includes(c.status)
+        (c) => !["EXCLUIDO", "ARQUIVADO"].includes(c.status),
       ),
-    [filteredCalls]
+    [filteredCalls],
   );
   const excludedCalls = useMemo(
     () => filteredCalls.filter((c) => c.status === "EXCLUIDO"),
-    [filteredCalls]
+    [filteredCalls],
   );
 
   const openCalls = useMemo(
     () => activeCalls.filter((c) => c.status === "ABERTO"),
-    [activeCalls]
+    [activeCalls],
   );
   const inProgressCalls = useMemo(
     () => activeCalls.filter((c) => c.status === "EM ANDAMENTO"),
-    [activeCalls]
+    [activeCalls],
   );
   const pendingApprovalCalls = useMemo(
     () => activeCalls.filter((c) => c.status === "AGUARDANDO_APROVACAO"),
-    [activeCalls]
+    [activeCalls],
   );
   const devolutionCalls = useMemo(
     () => activeCalls.filter((c) => c.status === "DEVOLUCAO"),
-    [activeCalls]
+    [activeCalls],
   );
   const concludedCalls = useMemo(
     () => activeCalls.filter((c) => c.status === "CONCLUIDO"),
-    [activeCalls]
+    [activeCalls],
   );
 
-  const filteredDrivers = useMemo(
-    () => drivers,
-    [drivers]
-  );
+  const filteredDrivers = useMemo(() => drivers, [drivers]);
   const availableDrivers = useMemo(
     () =>
       filteredDrivers.filter((d) => {
@@ -1675,7 +1693,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           d.vehicleType === driverVehicleFilter;
         return isAvailable && hubMatch && vehicleMatch;
       }),
-    [filteredDrivers, driverHubFilter, driverVehicleFilter]
+    [filteredDrivers, driverHubFilter, driverVehicleFilter],
   );
 
   const filteredOpenCalls = useMemo(
@@ -1683,7 +1701,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       urgencyFilter === "TODOS"
         ? openCalls
         : openCalls.filter((call) => call.urgency === urgencyFilter),
-    [openCalls, urgencyFilter]
+    [openCalls, urgencyFilter],
   );
 
   const filteredExcludedCalls = useMemo(
@@ -1695,9 +1713,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               .toLowerCase()
               .includes(excludedNameFilter.toLowerCase())) &&
           (excludedHubFilter === "Todos os Hubs" ||
-            call.hub === excludedHubFilter)
+            call.hub === excludedHubFilter),
       ),
-    [excludedCalls, excludedNameFilter, excludedHubFilter]
+    [excludedCalls, excludedNameFilter, excludedHubFilter],
   );
 
   const filteredHistoryCalls = useMemo(() => {
@@ -1763,7 +1781,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         "Todos",
         ...new Set(calls.map((c) => c.hub).filter((h): h is string => !!h)),
       ].sort(),
-    [calls]
+    [calls],
   );
   const availableDriverHubs = useMemo(
     () =>
@@ -1771,27 +1789,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         "Todos os Hubs",
         ...new Set(drivers.map((d) => d.hub).filter((h): h is string => !!h)),
       ].sort(),
-    [drivers]
+    [drivers],
   );
   const vehicleTypes = useMemo(
     () =>
       [
         "Todos os Veículos",
         ...new Set(
-          drivers.map((d) => d.vehicleType).filter((v): v is string => !!v)
+          drivers.map((d) => d.vehicleType).filter((v): v is string => !!v),
         ),
       ].sort(),
-    [drivers]
+    [drivers],
   );
   const excludedCallHubs = useMemo(
     () =>
       [
         "Todos os Hubs",
         ...new Set(
-          excludedCalls.map((c) => c.hub).filter((h): h is string => !!h)
+          excludedCalls.map((c) => c.hub).filter((h): h is string => !!h),
         ),
       ] as string[],
-    [excludedCalls]
+    [excludedCalls],
   );
 
   const filterControls = (
@@ -1809,7 +1827,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               ? "Todos"
               : level.charAt(0) + level.slice(1).toLowerCase()}
           </Button>
-        )
+        ),
       )}
     </div>
   );
@@ -1837,7 +1855,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     ? calls.find(
         (c) =>
           c.assignedTo === infoModalDriver.uid &&
-          (c.status === "EM ANDAMENTO" || c.status === "AGUARDANDO_APROVACAO")
+          (c.status === "EM ANDAMENTO" || c.status === "AGUARDANDO_APROVACAO"),
       ) || null
     : null;
 
@@ -1933,9 +1951,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   return (
     <TooltipProvider>
       <div
-        className={cn(
-          "flex min-h-screen text-foreground"
-        )}
+        className={cn("flex min-h-screen text-foreground")}
         style={{
           background:
             theme === "light"
@@ -1950,7 +1966,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             isSidebarCollapsed ? "w-20" : "w-64",
             theme === "light"
               ? "bg-white/70 border-orange-200/50"
-              : "bg-[#1a0f0a]/98 border-[#2d1810]/80"
+              : "bg-[#1a0f0a]/98 border-[#2d1810]/80",
           )}
         >
           <Button
@@ -1968,7 +1984,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <div
             className={cn(
               "flex items-center gap-3 px-2 transition-all",
-              isSidebarCollapsed && "justify-center"
+              isSidebarCollapsed && "justify-center",
             )}
           >
             <img
@@ -1979,7 +1995,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <div
               className={cn(
                 "overflow-hidden transition-all duration-200",
-                isSidebarCollapsed ? "w-0 opacity-0" : "w-auto opacity-100"
+                isSidebarCollapsed ? "w-0 opacity-0" : "w-auto opacity-100",
               )}
             >
               <h1 className="text-xl font-bold text-primary whitespace-nowrap">
@@ -1992,7 +2008,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               variant={adminView === "kanban" ? "secondary" : "ghost"}
               className={cn(
                 "gap-2 justify-start",
-                isSidebarCollapsed && "justify-center"
+                isSidebarCollapsed && "justify-center",
               )}
               onClick={() => setAdminView("kanban")}
             >
@@ -2005,7 +2021,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               variant={adminView === "excluded" ? "secondary" : "ghost"}
               className={cn(
                 "gap-2 justify-start",
-                isSidebarCollapsed && "justify-center"
+                isSidebarCollapsed && "justify-center",
               )}
               onClick={() => setAdminView("excluded")}
             >
@@ -2018,7 +2034,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               variant={adminView === "history" ? "secondary" : "ghost"}
               className={cn(
                 "gap-2 justify-start",
-                isSidebarCollapsed && "justify-center"
+                isSidebarCollapsed && "justify-center",
               )}
               onClick={() => setAdminView("history")}
             >
@@ -2033,7 +2049,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               variant={adminView === "profile" ? "secondary" : "ghost"}
               className={cn(
                 "gap-2 w-full justify-start",
-                isSidebarCollapsed && "justify-center"
+                isSidebarCollapsed && "justify-center",
               )}
               onClick={() => setAdminView("profile")}
             >
@@ -2049,14 +2065,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               "sticky top-0 z-10 p-4 sm:p-6 flex justify-between items-center backdrop-blur-xl border-b border-border transition-all duration-300",
               theme === "light"
                 ? "bg-gradient-to-r from-orange-50/90 via-orange-100/80 to-orange-50/90"
-                : "bg-background/95"
+                : "bg-background/95",
             )}
           >
             <div className="flex items-center gap-4">
               <h2
                 className={cn(
                   "text-xl font-semibold",
-                  theme === "light" ? "text-slate-800" : "text-foreground"
+                  theme === "light" ? "text-slate-800" : "text-foreground",
                 )}
               >
                 {viewTitles[adminView]}
@@ -2101,7 +2117,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <button
                   onClick={() => {
                     onRefresh();
-                    showNotification("info", "Atualizando", "Recarregando dados do servidor...");
+                    showNotification(
+                      "info",
+                      "Atualizando",
+                      "Recarregando dados do servidor...",
+                    );
                   }}
                   className="w-10 h-10 rounded-xl flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-all"
                   aria-label="Atualizar dados"
@@ -2141,10 +2161,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </button>
                   </PopoverTrigger>
                   <PopoverContent className="w-80" align="end">
-                    <h4 className="font-medium mb-4 text-sm">Cor de Fundo do Card</h4>
+                    <h4 className="font-medium mb-4 text-sm">
+                      Cor de Fundo do Card
+                    </h4>
                     <div className="space-y-4">
                       <div className="space-y-2">
-                        <label className="text-xs font-medium text-slate-600">Cor Principal</label>
+                        <label className="text-xs font-medium text-slate-600">
+                          Cor Principal
+                        </label>
                         <div className="flex gap-2">
                           <input
                             type="color"
@@ -2156,9 +2180,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               }));
                               const user = auth.currentUser;
                               if (user) {
-                                updateDoc(doc(db, "admins_pre_aprovados", user.uid), {
-                                  cardMainColor: e.target.value,
-                                });
+                                updateDoc(
+                                  doc(db, "admins_pre_aprovados", user.uid),
+                                  {
+                                    cardMainColor: e.target.value,
+                                  },
+                                );
                               }
                             }}
                             className="w-12 h-12 rounded border cursor-pointer"
@@ -2177,7 +2204,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </div>
                       </div>
                       <div className="space-y-2">
-                        <label className="text-xs font-medium text-slate-600">Cor do Gradiente</label>
+                        <label className="text-xs font-medium text-slate-600">
+                          Cor do Gradiente
+                        </label>
                         <div className="flex gap-2">
                           <input
                             type="color"
@@ -2189,9 +2218,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               }));
                               const user = auth.currentUser;
                               if (user) {
-                                updateDoc(doc(db, "admins_pre_aprovados", user.uid), {
-                                  cardGradientColor: e.target.value,
-                                });
+                                updateDoc(
+                                  doc(db, "admins_pre_aprovados", user.uid),
+                                  {
+                                    cardGradientColor: e.target.value,
+                                  },
+                                );
                               }
                             }}
                             className="w-12 h-12 rounded border cursor-pointer"
@@ -2210,17 +2242,51 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </div>
                       </div>
                       <div className="space-y-2">
-                        <label className="text-xs font-medium text-slate-600">Cores Pré-definidas</label>
+                        <label className="text-xs font-medium text-slate-600">
+                          Cores Pré-definidas
+                        </label>
                         <div className="grid grid-cols-4 gap-2">
                           {[
-                            { name: "Preto", main: "#000000", gradient: "#1a1a1a" },
-                            { name: "Azul Escuro", main: "#1e3a8a", gradient: "#1e40af" },
-                            { name: "Verde Escuro", main: "#166534", gradient: "#15803d" },
-                            { name: "Roxo Escuro", main: "#581c87", gradient: "#6b21a8" },
-                            { name: "Vermelho Escuro", main: "#991b1b", gradient: "#b91c1c" },
-                            { name: "Laranja Escuro", main: "#9a3412", gradient: "#c2410c" },
-                            { name: "Cinza Escuro", main: "#374151", gradient: "#4b5563" },
-                            { name: "Azul Marinho", main: "#0f172a", gradient: "#1e293b" },
+                            {
+                              name: "Preto",
+                              main: "#000000",
+                              gradient: "#1a1a1a",
+                            },
+                            {
+                              name: "Azul Escuro",
+                              main: "#1e3a8a",
+                              gradient: "#1e40af",
+                            },
+                            {
+                              name: "Verde Escuro",
+                              main: "#166534",
+                              gradient: "#15803d",
+                            },
+                            {
+                              name: "Roxo Escuro",
+                              main: "#581c87",
+                              gradient: "#6b21a8",
+                            },
+                            {
+                              name: "Vermelho Escuro",
+                              main: "#991b1b",
+                              gradient: "#b91c1c",
+                            },
+                            {
+                              name: "Laranja Escuro",
+                              main: "#9a3412",
+                              gradient: "#c2410c",
+                            },
+                            {
+                              name: "Cinza Escuro",
+                              main: "#374151",
+                              gradient: "#4b5563",
+                            },
+                            {
+                              name: "Azul Marinho",
+                              main: "#0f172a",
+                              gradient: "#1e293b",
+                            },
                           ].map((preset) => (
                             <button
                               key={preset.name}
@@ -2231,10 +2297,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 });
                                 const user = auth.currentUser;
                                 if (user) {
-                                  updateDoc(doc(db, "admins_pre_aprovados", user.uid), {
-                                    cardMainColor: preset.main,
-                                    cardGradientColor: preset.gradient,
-                                  });
+                                  updateDoc(
+                                    doc(db, "admins_pre_aprovados", user.uid),
+                                    {
+                                      cardMainColor: preset.main,
+                                      cardGradientColor: preset.gradient,
+                                    },
+                                  );
                                 }
                               }}
                               className="flex flex-col items-center gap-1 p-2 rounded border hover:bg-slate-50 transition-colors"
@@ -2245,7 +2314,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                   background: `linear-gradient(to bottom, ${preset.main} 0%, ${preset.gradient} 100%)`,
                                 }}
                               />
-                              <span className="text-xs text-slate-600">{preset.name}</span>
+                              <span className="text-xs text-slate-600">
+                                {preset.name}
+                              </span>
                             </button>
                           ))}
                         </div>
@@ -2288,7 +2359,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     showDetailed={true}
                     selectedDay={selectedWeatherDay}
                     onDayClick={(day) => {
-                      setSelectedWeatherDay(selectedWeatherDay === day.date ? null : day.date);
+                      setSelectedWeatherDay(
+                        selectedWeatherDay === day.date ? null : day.date,
+                      );
                     }}
                   />
                 </div>
@@ -2365,7 +2438,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             >
                               {renderColumnContent(
                                 col.id,
-                                getColumnData(col.id)
+                                getColumnData(col.id),
                               )}
                             </div>
                           </ResizablePanel>
@@ -2376,13 +2449,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 background: "rgba(255, 255, 255, 0.1)",
                               }}
                               onMouseEnter={(
-                                e: React.MouseEvent<HTMLDivElement>
+                                e: React.MouseEvent<HTMLDivElement>,
                               ) => {
                                 e.currentTarget.style.background =
                                   "rgba(249, 115, 22, 0.5)";
                               }}
                               onMouseLeave={(
-                                e: React.MouseEvent<HTMLDivElement>
+                                e: React.MouseEvent<HTMLDivElement>,
                               ) => {
                                 e.currentTarget.style.background =
                                   "rgba(255, 255, 255, 0.1)";
@@ -2438,10 +2511,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               deletedTimestamp instanceof Timestamp
                                 ? deletedTimestamp.toDate()
                                 : new Date(
-                                    (deletedTimestamp as any).seconds * 1000
+                                    (deletedTimestamp as any).seconds * 1000,
                                   ),
                               "dd/MM/yyyy 'às' HH:mm",
-                              { locale: ptBR }
+                              { locale: ptBR },
                             )
                           : "Data indisponível";
                         return (
@@ -2597,17 +2670,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         <tbody>
                           {filteredHistoryCalls.map((call) => {
                             const assignedDriver = drivers.find(
-                              (d) => d.uid === call.assignedTo
+                              (d) => d.uid === call.assignedTo,
                             );
                             const formattedDate = call.timestamp
                               ? format(
                                   call.timestamp instanceof Timestamp
                                     ? call.timestamp.toDate()
                                     : new Date(
-                                        (call.timestamp as any).seconds * 1000
+                                        (call.timestamp as any).seconds * 1000,
                                       ),
                                   "dd/MM/yy HH:mm",
-                                  { locale: ptBR }
+                                  { locale: ptBR },
                                 )
                               : "N/A";
                             return (
@@ -2652,13 +2725,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           "shadow-lg border",
                           theme === "dark"
                             ? "bg-slate-800/90 border-orange-500/30"
-                            : "bg-white/80 border-orange-200/50"
+                            : "bg-white/80 border-orange-200/50",
                         )}
                       >
                         <CardHeader>
                           <CardTitle
                             className={cn(
-                              theme === "dark" ? "text-white" : "text-slate-800"
+                              theme === "dark"
+                                ? "text-white"
+                                : "text-slate-800",
                             )}
                           >
                             Foto de Perfil
@@ -2677,7 +2752,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     "w-40 h-40 rounded-full overflow-hidden border-4 flex items-center justify-center",
                                     theme === "dark"
                                       ? "border-orange-500/30 bg-slate-700/50"
-                                      : "border-orange-200/50 bg-orange-50/80"
+                                      : "border-orange-200/50 bg-orange-50/80",
                                   )}
                                 >
                                   {avatarPreview || adminProfile.avatar ? (
@@ -2692,7 +2767,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         "text-5xl font-bold",
                                         theme === "dark"
                                           ? "text-white"
-                                          : "text-slate-800"
+                                          : "text-slate-800",
                                       )}
                                     >
                                       {adminProfile.initials}
@@ -2730,7 +2805,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                   "text-sm text-center",
                                   theme === "dark"
                                     ? "text-slate-300"
-                                    : "text-slate-600"
+                                    : "text-slate-600",
                                 )}
                               >
                                 Clique na câmera para alterar a foto
@@ -2746,13 +2821,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           "shadow-lg border",
                           theme === "dark"
                             ? "bg-slate-800/90 border-orange-500/30"
-                            : "bg-white/80 border-orange-200/50"
+                            : "bg-white/80 border-orange-200/50",
                         )}
                       >
                         <CardHeader>
                           <CardTitle
                             className={cn(
-                              theme === "dark" ? "text-white" : "text-slate-800"
+                              theme === "dark"
+                                ? "text-white"
+                                : "text-slate-800",
                             )}
                           >
                             Configurações do Painel
@@ -2764,7 +2841,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               "flex items-center justify-between p-4 rounded-lg border",
                               theme === "dark"
                                 ? "bg-slate-700/50 border-orange-500/30"
-                                : "bg-orange-50/80 border-orange-200/50"
+                                : "bg-orange-50/80 border-orange-200/50",
                             )}
                           >
                             <div className="flex items-center gap-3">
@@ -2793,7 +2870,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                   "text-sm font-medium",
                                   theme === "dark"
                                     ? "text-white"
-                                    : "text-slate-800"
+                                    : "text-slate-800",
                                 )}
                               >
                                 Som das Notificações
@@ -2816,7 +2893,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               "p-4 rounded-lg border",
                               theme === "dark"
                                 ? "bg-slate-700/50 border-orange-500/30"
-                                : "bg-orange-50/80 border-orange-200/50"
+                                : "bg-orange-50/80 border-orange-200/50",
                             )}
                           >
                             <div className="flex items-center gap-3 mb-3">
@@ -2833,7 +2910,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                   "text-sm font-medium",
                                   theme === "dark"
                                     ? "text-white"
-                                    : "text-slate-800"
+                                    : "text-slate-800",
                                 )}
                               >
                                 Filtrar por Hub
@@ -2854,12 +2931,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                   // Salvar imediatamente
                                   const user = auth.currentUser;
                                   if (user) {
-                                    updateDoc(doc(db, "admins_pre_aprovados", user.uid), {
-                                      hub: selectedHub,
-                                      city: city,
-                                    }).catch((error) => {
-                                      console.error("Erro ao salvar hub:", error);
-                                      sonnerToast.error("Erro ao salvar hub selecionado");
+                                    updateDoc(
+                                      doc(db, "admins_pre_aprovados", user.uid),
+                                      {
+                                        hub: selectedHub,
+                                        city: city,
+                                      },
+                                    ).catch((error) => {
+                                      console.error(
+                                        "Erro ao salvar hub:",
+                                        error,
+                                      );
+                                      sonnerToast.error(
+                                        "Erro ao salvar hub selecionado",
+                                      );
                                     });
                                   }
                                 }}
@@ -2879,13 +2964,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           "shadow-lg border",
                           theme === "dark"
                             ? "bg-slate-800/90 border-orange-500/30"
-                            : "bg-white/80 border-orange-200/50"
+                            : "bg-white/80 border-orange-200/50",
                         )}
                       >
                         <CardHeader>
                           <CardTitle
                             className={cn(
-                              theme === "dark" ? "text-white" : "text-slate-800"
+                              theme === "dark"
+                                ? "text-white"
+                                : "text-slate-800",
                             )}
                           >
                             Perfil do Administrador
@@ -2905,7 +2992,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     "text-lg font-bold pb-2 border-b",
                                     theme === "dark"
                                       ? "text-white border-orange-500/30"
-                                      : "text-slate-800 border-orange-200/50"
+                                      : "text-slate-800 border-orange-200/50",
                                   )}
                                 >
                                   Informações Pessoais
@@ -2919,7 +3006,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         "text-sm font-semibold flex items-center gap-2",
                                         theme === "dark"
                                           ? "text-slate-300"
-                                          : "text-slate-700"
+                                          : "text-slate-700",
                                       )}
                                     >
                                       <User size={16} />
@@ -2938,7 +3025,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         "w-full p-3 rounded-xl border outline-none transition-all",
                                         theme === "dark"
                                           ? "bg-orange-500/20 border-orange-500/30 text-white placeholder:text-slate-400 focus:ring-2 focus:ring-orange-500/50"
-                                          : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-orange-500/50"
+                                          : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-orange-500/50",
                                       )}
                                       placeholder="Digite seu nome completo"
                                       required
@@ -2952,7 +3039,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         "text-sm font-semibold flex items-center gap-2",
                                         theme === "dark"
                                           ? "text-slate-300"
-                                          : "text-slate-700"
+                                          : "text-slate-700",
                                       )}
                                     >
                                       <Mail size={16} />
@@ -2966,7 +3053,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         "w-full p-3 rounded-xl border outline-none cursor-not-allowed opacity-60",
                                         theme === "dark"
                                           ? "bg-slate-700/50 border-orange-500/30 text-slate-400"
-                                          : "bg-slate-100 border-orange-200/50 text-slate-600"
+                                          : "bg-slate-100 border-orange-200/50 text-slate-600",
                                       )}
                                     />
                                   </div>
@@ -2978,7 +3065,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         "text-sm font-semibold flex items-center gap-2",
                                         theme === "dark"
                                           ? "text-slate-300"
-                                          : "text-slate-700"
+                                          : "text-slate-700",
                                       )}
                                     >
                                       <Phone size={16} />
@@ -2990,29 +3077,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                       onChange={(e) => {
                                         const value = e.target.value.replace(
                                           /\D/g,
-                                          ""
+                                          "",
                                         );
                                         let formatted = value;
                                         if (value.length > 10) {
                                           formatted = `(${value.slice(
                                             0,
-                                            2
+                                            2,
                                           )}) ${value.slice(
                                             2,
-                                            7
+                                            7,
                                           )}-${value.slice(7, 11)}`;
                                         } else if (value.length > 6) {
                                           formatted = `(${value.slice(
                                             0,
-                                            2
+                                            2,
                                           )}) ${value.slice(
                                             2,
-                                            6
+                                            6,
                                           )}-${value.slice(6)}`;
                                         } else if (value.length > 2) {
                                           formatted = `(${value.slice(
                                             0,
-                                            2
+                                            2,
                                           )}) ${value.slice(2)}`;
                                         }
                                         setAdminProfile((prev) => ({
@@ -3024,7 +3111,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         "w-full p-3 rounded-xl border outline-none transition-all",
                                         theme === "dark"
                                           ? "bg-orange-500/20 border-orange-500/30 text-white placeholder:text-slate-400 focus:ring-2 focus:ring-orange-500/50"
-                                          : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-orange-500/50"
+                                          : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-orange-500/50",
                                       )}
                                       placeholder="(00) 00000-0000"
                                       maxLength={15}
@@ -3038,7 +3125,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         "text-sm font-semibold flex items-center gap-2",
                                         theme === "dark"
                                           ? "text-slate-300"
-                                          : "text-slate-700"
+                                          : "text-slate-700",
                                       )}
                                     >
                                       <MessageCircle size={16} />
@@ -3050,29 +3137,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                       onChange={(e) => {
                                         const value = e.target.value.replace(
                                           /\D/g,
-                                          ""
+                                          "",
                                         );
                                         let formatted = value;
                                         if (value.length > 10) {
                                           formatted = `(${value.slice(
                                             0,
-                                            2
+                                            2,
                                           )}) ${value.slice(
                                             2,
-                                            7
+                                            7,
                                           )}-${value.slice(7, 11)}`;
                                         } else if (value.length > 6) {
                                           formatted = `(${value.slice(
                                             0,
-                                            2
+                                            2,
                                           )}) ${value.slice(
                                             2,
-                                            6
+                                            6,
                                           )}-${value.slice(6)}`;
                                         } else if (value.length > 2) {
                                           formatted = `(${value.slice(
                                             0,
-                                            2
+                                            2,
                                           )}) ${value.slice(2)}`;
                                         }
                                         setAdminProfile((prev) => ({
@@ -3084,7 +3171,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         "w-full p-3 rounded-xl border outline-none transition-all",
                                         theme === "dark"
                                           ? "bg-orange-500/20 border-orange-500/30 text-white placeholder:text-slate-400 focus:ring-2 focus:ring-orange-500/50"
-                                          : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-orange-500/50"
+                                          : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-orange-500/50",
                                       )}
                                       placeholder="(00) 00000-0000"
                                       maxLength={15}
@@ -3100,7 +3187,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     "text-lg font-bold pb-2 border-b",
                                     theme === "dark"
                                       ? "text-white border-orange-500/30"
-                                      : "text-slate-800 border-orange-200/50"
+                                      : "text-slate-800 border-orange-200/50",
                                   )}
                                 >
                                   Informações Profissionais
@@ -3114,7 +3201,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         "text-sm font-semibold flex items-center gap-2",
                                         theme === "dark"
                                           ? "text-slate-300"
-                                          : "text-slate-700"
+                                          : "text-slate-700",
                                       )}
                                     >
                                       <Building size={16} />
@@ -3133,7 +3220,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         "w-full p-3 rounded-xl border outline-none transition-all",
                                         theme === "dark"
                                           ? "bg-orange-500/20 border-orange-500/30 text-white placeholder:text-slate-400 focus:ring-2 focus:ring-orange-500/50"
-                                          : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-orange-500/50"
+                                          : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-orange-500/50",
                                       )}
                                       placeholder="Ex: Logística, Operações"
                                     />
@@ -3146,7 +3233,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         "text-sm font-semibold flex items-center gap-2",
                                         theme === "dark"
                                           ? "text-slate-300"
-                                          : "text-slate-700"
+                                          : "text-slate-700",
                                       )}
                                     >
                                       <Briefcase size={16} />
@@ -3165,7 +3252,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         "w-full p-3 rounded-xl border outline-none transition-all",
                                         theme === "dark"
                                           ? "bg-orange-500/20 border-orange-500/30 text-white placeholder:text-slate-400 focus:ring-2 focus:ring-orange-500/50"
-                                          : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-orange-500/50"
+                                          : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-orange-500/50",
                                       )}
                                       placeholder="Ex: Gerente, Coordenador"
                                     />
@@ -3178,7 +3265,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         "text-sm font-semibold flex items-center gap-2",
                                         theme === "dark"
                                           ? "text-slate-300"
-                                          : "text-slate-700"
+                                          : "text-slate-700",
                                       )}
                                     >
                                       <Linkedin size={16} />
@@ -3197,7 +3284,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         "w-full p-3 rounded-xl border outline-none transition-all",
                                         theme === "dark"
                                           ? "bg-orange-500/20 border-orange-500/30 text-white placeholder:text-slate-400 focus:ring-2 focus:ring-orange-500/50"
-                                          : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-orange-500/50"
+                                          : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-orange-500/50",
                                       )}
                                       placeholder="https://linkedin.com/in/seu-perfil"
                                     />
@@ -3210,7 +3297,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         "text-sm font-semibold flex items-center gap-2",
                                         theme === "dark"
                                           ? "text-slate-300"
-                                          : "text-slate-700"
+                                          : "text-slate-700",
                                       )}
                                     >
                                       <FileText size={16} />
@@ -3229,7 +3316,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         "w-full p-3 rounded-xl border outline-none transition-all resize-none",
                                         theme === "dark"
                                           ? "bg-orange-500/20 border-orange-500/30 text-white placeholder:text-slate-400 focus:ring-2 focus:ring-orange-500/50"
-                                          : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-orange-500/50"
+                                          : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-orange-500/50",
                                       )}
                                       placeholder="Conte um pouco sobre você..."
                                     />
@@ -3244,7 +3331,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     "text-lg font-bold pb-2 border-b",
                                     theme === "dark"
                                       ? "text-white border-orange-500/30"
-                                      : "text-slate-800 border-orange-200/50"
+                                      : "text-slate-800 border-orange-200/50",
                                   )}
                                 >
                                   Endereço
@@ -3258,7 +3345,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         "text-sm font-semibold flex items-center gap-2",
                                         theme === "dark"
                                           ? "text-slate-300"
-                                          : "text-slate-700"
+                                          : "text-slate-700",
                                       )}
                                     >
                                       <Hash size={16} />
@@ -3270,13 +3357,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                       onChange={(e) => {
                                         const value = e.target.value.replace(
                                           /\D/g,
-                                          ""
+                                          "",
                                         );
                                         let formatted = value;
                                         if (value.length > 5) {
                                           formatted = `${value.slice(
                                             0,
-                                            5
+                                            5,
                                           )}-${value.slice(5, 8)}`;
                                         }
                                         setAdminProfile((prev) => ({
@@ -3288,7 +3375,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         "w-full p-3 rounded-xl border outline-none transition-all",
                                         theme === "dark"
                                           ? "bg-orange-500/20 border-orange-500/30 text-white placeholder:text-slate-400 focus:ring-2 focus:ring-orange-500/50"
-                                          : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-orange-500/50"
+                                          : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-orange-500/50",
                                       )}
                                       placeholder="00000-000"
                                       maxLength={9}
@@ -3302,7 +3389,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         "text-sm font-semibold flex items-center gap-2",
                                         theme === "dark"
                                           ? "text-slate-300"
-                                          : "text-slate-700"
+                                          : "text-slate-700",
                                       )}
                                     >
                                       <MapPin size={16} />
@@ -3321,7 +3408,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         "w-full p-3 rounded-xl border outline-none transition-all",
                                         theme === "dark"
                                           ? "bg-orange-500/20 border-orange-500/30 text-white placeholder:text-slate-400 focus:ring-2 focus:ring-orange-500/50"
-                                          : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-orange-500/50"
+                                          : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-orange-500/50",
                                       )}
                                       placeholder="Digite a cidade"
                                     />
@@ -3334,7 +3421,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         "text-sm font-semibold flex items-center gap-2",
                                         theme === "dark"
                                           ? "text-slate-300"
-                                          : "text-slate-700"
+                                          : "text-slate-700",
                                       )}
                                     >
                                       <Building size={16} />
@@ -3353,7 +3440,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         "w-full p-3 rounded-xl border outline-none transition-all",
                                         theme === "dark"
                                           ? "bg-orange-500/20 border-orange-500/30 text-white placeholder:text-slate-400 focus:ring-2 focus:ring-orange-500/50"
-                                          : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-orange-500/50"
+                                          : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-orange-500/50",
                                       )}
                                       placeholder="UF"
                                       maxLength={2}
@@ -3367,7 +3454,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         "text-sm font-semibold flex items-center gap-2",
                                         theme === "dark"
                                           ? "text-slate-300"
-                                          : "text-slate-700"
+                                          : "text-slate-700",
                                       )}
                                     >
                                       <Home size={16} />
@@ -3386,7 +3473,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         "w-full p-3 rounded-xl border outline-none transition-all",
                                         theme === "dark"
                                           ? "bg-orange-500/20 border-orange-500/30 text-white placeholder:text-slate-400 focus:ring-2 focus:ring-orange-500/50"
-                                          : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-orange-500/50"
+                                          : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-orange-500/50",
                                       )}
                                       placeholder="Rua, número, complemento"
                                     />
@@ -3431,18 +3518,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           "shadow-lg border",
                           theme === "dark"
                             ? "bg-slate-800/90 border-orange-500/30"
-                            : "bg-white/80 border-orange-200/50"
+                            : "bg-white/80 border-orange-200/50",
                         )}
                       >
                         <CardContent className="pt-6">
                           <WeatherForecast
-                            city={adminProfile.city || getCityFromHub(adminProfile.hub)}
+                            city={
+                              adminProfile.city ||
+                              getCityFromHub(adminProfile.hub)
+                            }
                             hub={adminProfile.hub}
                             theme={theme}
                             showDetailed={true}
                             selectedDay={selectedWeatherDay}
                             onDayClick={(day) => {
-                              setSelectedWeatherDay(selectedWeatherDay === day.date ? null : day.date);
+                              setSelectedWeatherDay(
+                                selectedWeatherDay === day.date
+                                  ? null
+                                  : day.date,
+                              );
                             }}
                           />
                         </CardContent>

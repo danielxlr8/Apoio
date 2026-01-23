@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import imageCompression from "browser-image-compression";
 import type { Driver, SupportCall, UrgencyLevel } from "../types/logistics";
 import {
   Clock,
@@ -58,10 +59,11 @@ import {
 } from "firebase/auth";
 import {
   ref,
-  uploadBytesResumable,
+  uploadBytes, // CORREÇÃO: Usamos apenas uploadBytes (estável)
   getDownloadURL,
   deleteObject,
 } from "firebase/storage";
+import { increment } from "firebase/firestore";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
 import { cn } from "../lib/utils";
@@ -94,8 +96,6 @@ interface DriverInterfaceProps {
 
 const sessionNotifiedCallIds = new Set<string>();
 
-// DriverCallHistoryCard será movido para ./driver/components/DriverCallHistoryCard.tsx
-// Mantendo temporariamente aqui até ser extraído completamente
 const DriverCallHistoryCard = ({
   call,
   userId,
@@ -113,7 +113,7 @@ const DriverCallHistoryCard = ({
     if (!otherParty?.phone)
       return showNotification("error", "Erro", "Telefone indisponível.");
     const msg = encodeURIComponent(
-      `Olá, sou ${driver.name} referente ao apoio logístico.`
+      `Olá, sou ${driver.name} referente ao apoio logístico.`,
     );
     window.open(`https://wa.me/55${otherParty.phone}?text=${msg}`, "_blank");
   };
@@ -126,13 +126,13 @@ const DriverCallHistoryCard = ({
         "border border-border shadow-xl hover:shadow-2xl transition-all backdrop-blur-xl rounded-2xl overflow-hidden",
         isDark
           ? "bg-slate-800/90 border-slate-600/50 shadow-black/20 hover:shadow-black/30"
-          : "bg-white/80 border-orange-200/50 shadow-black/5 hover:shadow-black/10"
+          : "bg-white/80 border-orange-200/50 shadow-black/5 hover:shadow-black/10",
       )}
     >
       <div
         className={cn(
           "flex items-center justify-between p-4 border-b",
-          isDark ? "border-slate-600/50" : "border-orange-200/50"
+          isDark ? "border-slate-600/50" : "border-orange-200/50",
         )}
       >
         <div className="flex items-center gap-3">
@@ -141,7 +141,7 @@ const DriverCallHistoryCard = ({
               "p-2 rounded-xl backdrop-blur-sm shadow-lg shadow-black/10",
               isRequester
                 ? "bg-orange-500/20 dark:bg-orange-500/20 text-orange-700 dark:text-orange-300 border border-orange-400/30"
-                : "bg-orange-500/20 dark:bg-orange-500/20 text-orange-700 dark:text-orange-300 border border-orange-400/30"
+                : "bg-orange-500/20 dark:bg-orange-500/20 text-orange-700 dark:text-orange-300 border border-orange-400/30",
             )}
           >
             {isRequester ? <Package size={18} /> : <Truck size={18} />}
@@ -150,7 +150,7 @@ const DriverCallHistoryCard = ({
             <h3
               className={cn(
                 "text-sm font-bold",
-                isDark ? "text-white" : "text-slate-800"
+                isDark ? "text-white" : "text-slate-800",
               )}
             >
               {isRequester
@@ -160,7 +160,7 @@ const DriverCallHistoryCard = ({
             <p
               className={cn(
                 "text-xs flex items-center gap-1",
-                isDark ? "text-white/60" : "text-slate-600"
+                isDark ? "text-white/60" : "text-slate-600",
               )}
             >
               <CalendarClock size={12} /> {formatTimestamp(call.timestamp)}
@@ -172,7 +172,7 @@ const DriverCallHistoryCard = ({
           <p
             className={cn(
               "text-[10px] font-medium mt-1 uppercase tracking-wide",
-              isDark ? "text-white/50" : "text-slate-600"
+              isDark ? "text-white/50" : "text-slate-600",
             )}
           >
             {call.status.replace("_", " ")}
@@ -185,7 +185,7 @@ const DriverCallHistoryCard = ({
           <span
             className={cn(
               "text-[10px] uppercase font-bold block mb-0.5",
-              isDark ? "text-white/50" : "text-slate-600"
+              isDark ? "text-white/50" : "text-slate-600",
             )}
           >
             Rota ID
@@ -195,7 +195,7 @@ const DriverCallHistoryCard = ({
               "font-mono font-medium backdrop-blur-xl px-1.5 py-0.5 rounded-xl text-xs border",
               isDark
                 ? "text-white bg-orange-500/20 border-orange-500/30"
-                : "text-slate-800 bg-orange-50/80 border-orange-200/50"
+                : "text-slate-800 bg-orange-50/80 border-orange-200/50",
             )}
           >
             {call.routeId || "N/A"}
@@ -205,7 +205,7 @@ const DriverCallHistoryCard = ({
           <span
             className={cn(
               "text-[10px] uppercase font-bold block mb-0.5",
-              isDark ? "text-white/50" : "text-slate-600"
+              isDark ? "text-white/50" : "text-slate-600",
             )}
           >
             Pacotes
@@ -213,7 +213,7 @@ const DriverCallHistoryCard = ({
           <span
             className={cn(
               "font-medium",
-              isDark ? "text-white" : "text-slate-800"
+              isDark ? "text-white" : "text-slate-800",
             )}
           >
             {call.packageCount || 0} un.
@@ -223,7 +223,7 @@ const DriverCallHistoryCard = ({
           <span
             className={cn(
               "text-[10px] uppercase font-bold block mb-0.5",
-              isDark ? "text-white/50" : "text-slate-600"
+              isDark ? "text-white/50" : "text-slate-600",
             )}
           >
             Localização
@@ -236,7 +236,7 @@ const DriverCallHistoryCard = ({
               "flex items-center gap-1 hover:underline text-xs font-medium truncate transition-colors",
               isDark
                 ? "text-orange-300 hover:text-orange-200"
-                : "text-orange-600 hover:text-orange-500"
+                : "text-orange-600 hover:text-orange-500",
             )}
           >
             <MapPin size={12} /> {call.location} <ExternalLink size={10} />
@@ -270,14 +270,14 @@ const DriverCallHistoryCard = ({
       </div>
 
       {["EM ANDAMENTO", "ABERTO", "AGUARDANDO_APROVACAO"].includes(
-        call.status
+        call.status,
       ) && (
         <div
           className={cn(
             "p-3 backdrop-blur-xl border-t flex justify-end gap-2 flex-wrap",
             isDark
               ? "bg-slate-800/90 border-slate-600/50"
-              : "bg-orange-50/60 border-orange-200/50"
+              : "bg-orange-50/60 border-orange-200/50",
           )}
         >
           {otherParty && (
@@ -339,7 +339,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
 
   // Estado local para Optimistic UI - atualização instantânea
   const [localDriverStatus, setLocalDriverStatus] = useState<string>(
-    driver?.status || "INDISPONIVEL"
+    driver?.status || "INDISPONIVEL",
   );
 
   // Form States
@@ -356,7 +356,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
   const [isBulky, setIsBulky] = useState(false);
   const [cargoPhoto, setCargoPhoto] = useState<File | null>(null);
   const [cargoPhotoPreview, setCargoPhotoPreview] = useState<string | null>(
-    null
+    null,
   );
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
 
@@ -411,7 +411,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
           email: auth.currentUser?.email || "",
         }
       : null,
-    true // Sempre ativo para motoristas
+    true, // Sempre ativo para motoristas
   );
 
   const TABS = useMemo(
@@ -422,7 +422,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       { id: "tutorial", label: "Ajuda", icon: <BookOpen size={20} /> },
       { id: "profile", label: "Perfil", icon: <User size={20} /> },
     ],
-    []
+    [],
   );
 
   type TabId =
@@ -448,7 +448,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
   const activeCallForDriver = useMemo(() => {
     return (
       allMyCalls.find(
-        (call) => call.solicitante.id === userId && call.status === "ABERTO"
+        (call) => call.solicitante.id === userId && call.status === "ABERTO",
       ) || null
     );
   }, [allMyCalls, userId]);
@@ -468,7 +468,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
   const filteredHubs = useMemo(() => {
     if (!hubSearch) return HUBS;
     return HUBS.filter((h) =>
-      h.toLowerCase().includes(hubSearch.toLowerCase())
+      h.toLowerCase().includes(hubSearch.toLowerCase()),
     );
   }, [hubSearch]);
 
@@ -476,7 +476,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     const active = allMyCalls.filter(
       (c) =>
         (globalHubFilter === "Todos os Hubs" || c.hub === globalHubFilter) &&
-        c.status !== "EXCLUIDO"
+        c.status !== "EXCLUIDO",
     );
     if (historyFilter === "requester")
       return active.filter((c) => c.solicitante.id === userId);
@@ -484,7 +484,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       return active.filter((c) => c.assignedTo === userId);
     if (historyFilter === "inProgress")
       return active.filter((c) =>
-        ["EM ANDAMENTO", "AGUARDANDO_APROVACAO"].includes(c.status)
+        ["EM ANDAMENTO", "AGUARDANDO_APROVACAO"].includes(c.status),
       );
     return active;
   }, [allMyCalls, historyFilter, userId, globalHubFilter]);
@@ -495,9 +495,9 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
         (c) =>
           (globalHubFilter === "Todos os Hubs" || c.hub === globalHubFilter) &&
           (!routeIdSearch ||
-            c.routeId?.toLowerCase().includes(routeIdSearch.toLowerCase()))
+            c.routeId?.toLowerCase().includes(routeIdSearch.toLowerCase())),
       ),
-    [openSupportCalls, routeIdSearch, globalHubFilter]
+    [openSupportCalls, routeIdSearch, globalHubFilter],
   );
 
   // Removed unused variable: allHubs
@@ -512,7 +512,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
   useEffect(() => {
     const updateDateTime = () => {
       const brazilTime = new Date(
-        new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" })
+        new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }),
       );
       setCurrentDateTime(brazilTime);
     };
@@ -565,8 +565,8 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
           driversRef,
           or(
             where("uid", "==", driver.uid),
-            where("googleUid", "==", driver.uid)
-          )
+            where("googleUid", "==", driver.uid),
+          ),
         );
         try {
           const querySnapshot = await getDocs(q);
@@ -599,7 +599,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
             "p-2 rounded-full",
             newMutedState
               ? "bg-red-500/20 text-red-300 border border-red-400/30"
-              : "bg-green-500/20 text-green-300 border border-green-400/30"
+              : "bg-green-500/20 text-green-300 border border-green-400/30",
           )}
         >
           {newMutedState ? <VolumeX size={20} /> : <Volume2 size={20} />}
@@ -657,7 +657,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     const allDriversQuery = query(collection(db, "motoristas_pre_aprovados"));
     const unsubscribeAllDrivers = onSnapshot(allDriversQuery, (snapshot) => {
       const driversData = snapshot.docs.map(
-        (doc) => ({ ...doc.data(), uid: doc.id } as Driver)
+        (doc) => ({ ...doc.data(), uid: doc.id }) as Driver,
       );
       setAllDrivers(driversData);
     });
@@ -672,24 +672,24 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       and(
         or(
           where("solicitante.id", "==", userId),
-          where("assignedTo", "==", userId)
+          where("assignedTo", "==", userId),
         ),
         where("timestamp", ">=", Timestamp.fromDate(start)),
-        where("timestamp", "<=", Timestamp.fromDate(end))
+        where("timestamp", "<=", Timestamp.fromDate(end)),
       ),
-      orderBy("timestamp", "desc")
+      orderBy("timestamp", "desc"),
     );
 
     const unsubscribeMyCalls = onSnapshot(myCallsQuery, (snapshot) => {
       const callsData = snapshot.docs.map(
-        (doc) => ({ id: doc.id, ...doc.data() } as SupportCall)
+        (doc) => ({ id: doc.id, ...doc.data() }) as SupportCall,
       );
       setAllMyCalls(callsData);
     });
 
     const openCallsQuery = query(
       collection(db, "supportCalls"),
-      where("status", "==", "ABERTO")
+      where("status", "==", "ABERTO"),
     );
     const unsubscribeOpenCalls = onSnapshot(openCallsQuery, (snapshot) => {
       snapshot.docChanges().forEach((change) => {
@@ -706,10 +706,11 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       });
       isInitialOpenCallsLoad.current = false;
       const openCallsData = snapshot.docs.map(
-        (doc) => ({ id: doc.id, ...doc.data() } as SupportCall)
+        (doc) => ({ id: doc.id, ...doc.data() }) as SupportCall,
       );
+      // CORREÇÃO BUG 2: Bloquear motorista de ver o próprio chamado
       setOpenSupportCalls(
-        openCallsData.filter((call) => call.solicitante.id !== userId)
+        openCallsData.filter((call) => call.solicitante.id !== userId),
       );
     });
 
@@ -722,7 +723,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
 
   const updateDriver = async (
     driverId: string,
-    updates: Partial<Omit<Driver, "uid">>
+    updates: Partial<Omit<Driver, "uid">>,
   ) => {
     if (!driverId) return;
     await updateDoc(doc(db, "motoristas_pre_aprovados", driverId), updates);
@@ -730,29 +731,22 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
 
   const updateCall = async (
     id: string,
-    updates: Partial<Omit<SupportCall, "id">>
+    updates: Partial<Omit<SupportCall, "id">>,
   ) => {
     await updateDoc(doc(db, "supportCalls", id), updates as any);
-  };
-
-  const addNewCall = async (newCall: any) => {
-    await addDoc(collection(db, "supportCalls"), {
-      ...newCall,
-      timestamp: serverTimestamp(),
-    });
   };
 
   // --- HANDLERS ---
 
   const handleAddField = (
-    setter: React.Dispatch<React.SetStateAction<string[]>>
+    setter: React.Dispatch<React.SetStateAction<string[]>>,
   ) => {
     setter((prev) => [...prev, ""]);
   };
 
   const handleRemoveField = (
     index: number,
-    setter: React.Dispatch<React.SetStateAction<string[]>>
+    setter: React.Dispatch<React.SetStateAction<string[]>>,
   ) => {
     setter((prev) => prev.filter((_, i) => i !== index));
   };
@@ -760,7 +754,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
   const handleFieldChange = (
     index: number,
     value: string,
-    setter: React.Dispatch<React.SetStateAction<string[]>>
+    setter: React.Dispatch<React.SetStateAction<string[]>>,
   ) => {
     setter((prev) => {
       const newValues = [...prev];
@@ -774,7 +768,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       return showNotification(
         "error",
         "Perfil Incompleto",
-        "Verifique seus dados."
+        "Verifique seus dados.",
       );
 
     // OPTIMISTIC UI: Atualizar estado local IMEDIATAMENTE
@@ -816,7 +810,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
   const handleRequestApproval = (id: string) => {
     updateCall(id, { status: "AGUARDANDO_APROVACAO" })
       .then(() =>
-        showNotification("success", "Sucesso", "Solicitado aprovação.")
+        showNotification("success", "Sucesso", "Solicitado aprovação."),
       )
       .catch(() => showNotification("error", "Erro", "Falha na solicitação."));
   };
@@ -880,7 +874,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     try {
       const credential = EmailAuthProvider.credential(
         user.email,
-        currentPassword
+        currentPassword,
       );
       await reauthenticateWithCredential(user, credential);
       await updatePassword(user, newPassword);
@@ -898,30 +892,99 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    const user = auth.currentUser;
+
     if (!file || !shopeeId) return;
-    setIsUploading(true);
-    if (driver.avatar) {
-      try {
-        await deleteObject(ref(storage, driver.avatar));
-      } catch {}
-    }
-    const storageRef = ref(storage, `avatars/${shopeeId}/avatar.jpg`);
-    const uploadTask = uploadBytesResumable(storageRef, file);
-    uploadTask.on(
-      "state_changed",
-      null,
-      (err) => {
-        setIsUploading(false);
-        showNotification("error", "Erro", err.message);
-      },
-      () => {
-        getDownloadURL(uploadTask.snapshot.ref).then((url) => {
-          updateDriver(shopeeId, { avatar: url });
-          setIsUploading(false);
-          showNotification("success", "Foto", "Atualizada com sucesso.");
-        });
+
+    try {
+      setIsUploading(true);
+
+      // 1. VERIFICAÇÃO DE LIMITE DE TROCAS
+      const driverDoc = doc(db, "motoristas_pre_aprovados", shopeeId);
+      const currentCount = driver.avatarUpdateCount || 0;
+      const lastUpdate = driver.lastAvatarUpdate;
+
+      const now = new Date();
+
+      let resetCounter = false;
+      if (lastUpdate) {
+        const lastUpdateDate = lastUpdate.toDate();
+        const lastMonth = lastUpdateDate.getMonth();
+        const lastYear = lastUpdateDate.getFullYear();
+        const currentMonth = now.getMonth();
+        const currentYear = now.getFullYear();
+
+        // Se mudou de mês ou ano, resetar contador
+        if (
+          currentYear > lastYear ||
+          (currentYear === lastYear && currentMonth > lastMonth)
+        ) {
+          resetCounter = true;
+        }
       }
-    );
+
+      if (!resetCounter && currentCount >= 3) {
+        setIsUploading(false);
+        showNotification(
+          "error",
+          "Limite Atingido",
+          "Você pode trocar a foto de perfil no máximo 3 vezes por mês. Aguarde o próximo mês.",
+        );
+        return;
+      }
+
+      // 2. COMPRESSÃO DA IMAGEM
+      showNotification("info", "Processando", "Comprimindo imagem...");
+
+      const compressionOptions = {
+        maxWidthOrHeight: 500,
+        maxSizeMB: 0.1, // 100KB
+        fileType: "image/jpeg" as const,
+        useWebWorker: true,
+      };
+
+      const compressedBlob = await imageCompression(file, compressionOptions);
+
+      // 3. CONVERSÃO PARA ARRAY BUFFER (CORREÇÃO ERRO 412/Unknown)
+      // O Firebase aceita ArrayBuffer de forma muito mais confiável do que Blob em alguns browsers
+      const fileBuffer = await compressedBlob.arrayBuffer();
+
+      // 4. UPLOAD COM NOME ÚNICO
+      // Adicionamos um timestamp no nome para garantir que é um arquivo novo
+      const fileName = `avatar_${Date.now()}.jpg`;
+      const storageRef = ref(storage, `avatars/${shopeeId}/${fileName}`);
+
+      const metadata = { contentType: "image/jpeg" };
+
+      await uploadBytes(storageRef, fileBuffer, metadata);
+      const url = await getDownloadURL(storageRef);
+
+      // 5. ATUALIZAR FIRESTORE
+      const updates: any = {
+        avatar: url,
+        lastAvatarUpdate: serverTimestamp(),
+      };
+
+      if (resetCounter) {
+        updates.avatarUpdateCount = 1;
+      } else {
+        updates.avatarUpdateCount = increment(1);
+      }
+
+      await updateDoc(driverDoc, updates);
+
+      setIsUploading(false);
+      const remainingChanges = resetCounter ? 2 : 2 - currentCount;
+      showNotification(
+        "success",
+        "Foto Atualizada!",
+        `Você ainda pode trocar ${remainingChanges} vez(es) este mês.`,
+      );
+    } catch (error: any) {
+      setIsUploading(false);
+      console.error(error);
+      showNotification("error", "Erro", error.message || "Erro no upload.");
+    }
   };
 
   const handleGetLocation = () => {
@@ -933,14 +996,14 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         setLocation(
-          `http://maps.google.com/?q=${pos.coords.latitude},${pos.coords.longitude}`
+          `http://maps.google.com/?q=${pos.coords.latitude},${pos.coords.longitude}`,
         );
         setIsLocating(false);
       },
       () => {
         setModalError("Erro ao obter localização.");
         setIsLocating(false);
-      }
+      },
     );
   };
 
@@ -998,9 +1061,12 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
         setIsUploadingPhoto(true);
         const photoRef = ref(
           storage,
-          `cargo-photos/${user.uid}/${Date.now()}_${cargoPhoto.name}`
+          `cargo-photos/${user.uid}/${Date.now()}_${cargoPhoto.name}`,
         );
-        await uploadBytesResumable(photoRef, cargoPhoto);
+
+        const metadata = { contentType: cargoPhoto.type || "image/jpeg" };
+        await uploadBytes(photoRef, cargoPhoto, metadata);
+
         cargoPhotoUrl = await getDownloadURL(photoRef);
       } catch (err: any) {
         setModalError("Erro ao fazer upload da foto: " + err.message);
@@ -1013,7 +1079,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     }
 
     const informalDesc = `MOTIVO: ${reason}. DETALHES: ${description}. Hub: ${hub}. Loc: ${location}. Qtd: ${pkg}. Regiões: ${regions.join(
-      ", "
+      ", ",
     )}. Veículos: ${vehicles.join(", ")}. ${isBulky ? "VOLUMOSO" : ""}`;
 
     try {
@@ -1027,6 +1093,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       const newCall = {
         routeId: `SPX-${Date.now().toString().slice(-6)}`,
         description: professionalDesc,
+        reason,
         urgency,
         location,
         status: "ABERTO",
@@ -1036,6 +1103,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
         packageCount: pkg,
         deliveryRegions: regions,
         cargoPhotoUrl,
+        timestamp: serverTimestamp(),
         solicitante: {
           id: driver.uid,
           name: driver.name,
@@ -1046,7 +1114,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
         },
       };
 
-      await addNewCall(newCall);
+      await addDoc(collection(db, "supportCalls"), newCall);
       setIsSupportModalOpen(false);
       setShowSuccessModal(true);
       setDeliveryRegions([""]);
@@ -1086,7 +1154,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
             "sticky top-0 z-30 px-4 sm:px-6 py-4 flex justify-between items-center backdrop-blur-xl border-b transition-all",
             theme === "dark"
               ? "border-orange-500/30 bg-slate-900/85"
-              : "border-orange-400/30 bg-white/85"
+              : "border-orange-400/30 bg-white/85",
           )}
           style={{
             backdropFilter: "blur(12px)",
@@ -1172,7 +1240,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
               "p-1.5 rounded-2xl flex justify-between overflow-x-auto scrollbar-hide border shadow-lg transition-all duration-300",
               theme === "light"
                 ? "bg-white/80 backdrop-blur-xl border-orange-200/50"
-                : "bg-slate-900/40 backdrop-blur-xl border-orange-500/30"
+                : "bg-slate-900/40 backdrop-blur-xl border-orange-500/30",
             )}
           >
             {TABS.map((tab) => (
@@ -1184,8 +1252,8 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                   activeTab === tab.id
                     ? "text-white bg-primary shadow-lg scale-105"
                     : theme === "light"
-                    ? "text-slate-700 hover:text-slate-900 hover:bg-orange-50/80"
-                    : "text-slate-300 hover:text-white hover:bg-orange-500/20"
+                      ? "text-slate-700 hover:text-slate-900 hover:bg-orange-50/80"
+                      : "text-slate-300 hover:text-white hover:bg-orange-500/20",
                 )}
               >
                 <div className="transition-transform duration-300">
@@ -1193,7 +1261,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     size: 20,
                     className: cn(
                       "mb-1 transition-all duration-300",
-                      activeTab === tab.id && "scale-110"
+                      activeTab === tab.id && "scale-110",
                     ),
                   })}
                 </div>
@@ -1259,17 +1327,17 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                             ? "bg-orange-500/20 text-white border-orange-500/40 shadow-xl transform scale-105"
                             : "bg-orange-50 text-slate-900 border-orange-300 shadow-xl transform scale-105"
                           : theme === "dark"
-                          ? "bg-slate-900/60 text-slate-300 border-orange-500/20 hover:bg-orange-500/10 hover:text-white hover:scale-102"
-                          : "bg-white/60 text-slate-700 border-orange-200/40 hover:bg-orange-50 hover:text-slate-900 hover:scale-102"
+                            ? "bg-slate-900/60 text-slate-300 border-orange-500/20 hover:bg-orange-500/10 hover:text-white hover:scale-102"
+                            : "bg-white/60 text-slate-700 border-orange-200/40 hover:bg-orange-50 hover:text-slate-900 hover:scale-102",
                       )}
                     >
                       {f === "all"
                         ? "Todos"
                         : f === "inProgress"
-                        ? "Em Andamento"
-                        : f === "requester"
-                        ? "Meus Pedidos"
-                        : "Meus Apoios"}
+                          ? "Em Andamento"
+                          : f === "requester"
+                            ? "Meus Pedidos"
+                            : "Meus Apoios"}
                     </button>
                   ))}
                 </div>
@@ -1282,7 +1350,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                         className={cn(
                           "h-8 text-xs font-normal justify-start text-left w-[130px] bg-white/80 dark:bg-orange-500/20 border-border dark:border-orange-500/30 text-foreground dark:text-white hover:bg-white dark:hover:bg-orange-500/30 backdrop-blur-xl rounded-xl shadow-lg shadow-black/5 dark:shadow-black/10 transition-all duration-300 ease-in-out hover:scale-105",
                           !startDate &&
-                            "text-muted-foreground dark:text-white/50"
+                            "text-muted-foreground dark:text-white/50",
                         )}
                       >
                         <CalendarIcon className="mr-2 h-3 w-3 transition-transform duration-300 group-hover:rotate-12" />
@@ -1311,7 +1379,8 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                         variant="outline"
                         className={cn(
                           "h-8 text-xs font-normal justify-start text-left w-[130px] bg-white/80 dark:bg-orange-500/20 border-border dark:border-orange-500/30 text-foreground dark:text-white hover:bg-white dark:hover:bg-orange-500/30 backdrop-blur-xl rounded-xl shadow-lg shadow-black/5 dark:shadow-black/10 transition-all duration-300 ease-in-out hover:scale-105",
-                          !endDate && "text-muted-foreground dark:text-white/50"
+                          !endDate &&
+                            "text-muted-foreground dark:text-white/50",
                         )}
                       >
                         <CalendarIcon className="mr-2 h-3 w-3 transition-transform duration-300 group-hover:rotate-12" />
@@ -1373,7 +1442,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                       "grid w-full grid-cols-2 backdrop-blur-xl p-1 rounded-xl h-10 mb-4 border shadow-xl",
                       theme === "dark"
                         ? "bg-slate-900/60 border-orange-500/30"
-                        : "bg-white/80 border-orange-200/50"
+                        : "bg-white/80 border-orange-200/50",
                     )}
                   >
                     <TabsTrigger
@@ -1382,7 +1451,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                         "text-xs data-[state=active]:shadow rounded-lg transition-all",
                         theme === "dark"
                           ? "text-slate-300 data-[state=active]:text-white data-[state=active]:bg-orange-500/20"
-                          : "text-slate-600 data-[state=active]:text-slate-900 data-[state=active]:bg-orange-50"
+                          : "text-slate-600 data-[state=active]:text-slate-900 data-[state=active]:bg-orange-50",
                       )}
                     >
                       Solicitante
@@ -1393,7 +1462,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                         "text-xs data-[state=active]:shadow rounded-lg transition-all",
                         theme === "dark"
                           ? "text-slate-300 data-[state=active]:text-white data-[state=active]:bg-orange-500/20"
-                          : "text-slate-600 data-[state=active]:text-slate-900 data-[state=active]:bg-orange-50"
+                          : "text-slate-600 data-[state=active]:text-slate-900 data-[state=active]:bg-orange-50",
                       )}
                     >
                       Prestador
@@ -1407,7 +1476,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                           "backdrop-blur-xl rounded-2xl p-4 border shadow-xl",
                           theme === "dark"
                             ? "bg-slate-900/60 border-orange-500/30"
-                            : "bg-white/80 border-orange-200/50"
+                            : "bg-white/80 border-orange-200/50",
                         )}
                       >
                         <h4 className="font-bold text-sm mb-2 flex gap-2 items-center text-foreground dark:text-white">
@@ -1428,7 +1497,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                           "backdrop-blur-xl rounded-2xl p-4 border shadow-xl",
                           theme === "dark"
                             ? "bg-slate-900/60 border-orange-500/30"
-                            : "bg-white/80 border-orange-200/50"
+                            : "bg-white/80 border-orange-200/50",
                         )}
                       >
                         <h4 className="font-bold text-sm mb-2 flex gap-2 items-center text-foreground dark:text-white">
@@ -1453,7 +1522,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     "rounded-[1.5rem] p-5 border",
                     theme === "dark"
                       ? "bg-slate-900/40 border-orange-500/30 backdrop-blur-sm"
-                      : "bg-white/80 border-orange-200/50"
+                      : "bg-white/80 border-orange-200/50",
                   )}
                   style={
                     theme === "dark"
@@ -1470,7 +1539,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                   <h4
                     className={cn(
                       "text-xs font-bold uppercase mb-4 tracking-wide",
-                      theme === "dark" ? "text-orange-300" : "text-slate-600"
+                      theme === "dark" ? "text-orange-300" : "text-slate-600",
                     )}
                   >
                     Configurações
@@ -1485,8 +1554,8 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                               ? "text-slate-400 bg-slate-800/80 border border-slate-600/30"
                               : "text-slate-500 bg-slate-100 border border-slate-300"
                             : theme === "dark"
-                            ? "text-emerald-300 bg-emerald-500/20 border border-emerald-400/30"
-                            : "text-emerald-600 bg-emerald-50 border border-emerald-300"
+                              ? "text-emerald-300 bg-emerald-500/20 border border-emerald-400/30"
+                              : "text-emerald-600 bg-emerald-50 border border-emerald-300",
                         )}
                       >
                         {isMuted ? (
@@ -1499,7 +1568,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                         <p
                           className={cn(
                             "font-bold text-sm",
-                            theme === "dark" ? "text-white" : "text-slate-800"
+                            theme === "dark" ? "text-white" : "text-slate-800",
                           )}
                         >
                           Sons de Alerta
@@ -1509,7 +1578,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                             "text-xs",
                             theme === "dark"
                               ? "text-slate-300"
-                              : "text-slate-600"
+                              : "text-slate-600",
                           )}
                         >
                           {isMuted ? "Silenciado" : "Ativado"}
@@ -1531,7 +1600,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     "rounded-[1.5rem] p-5 space-y-4 border",
                     theme === "dark"
                       ? "bg-slate-900/40 border-orange-500/30 backdrop-blur-sm"
-                      : "bg-white/80 border-orange-200/50"
+                      : "bg-white/80 border-orange-200/50",
                   )}
                   style={
                     theme === "dark"
@@ -1548,7 +1617,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                   <h4
                     className={cn(
                       "text-xs font-bold uppercase mb-2 tracking-wide",
-                      theme === "dark" ? "text-slate-300" : "text-slate-600"
+                      theme === "dark" ? "text-slate-300" : "text-slate-600",
                     )}
                   >
                     Meus Dados
@@ -1558,7 +1627,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     <label
                       className={cn(
                         "text-xs font-bold",
-                        theme === "dark" ? "text-orange-300" : "text-slate-600"
+                        theme === "dark" ? "text-orange-300" : "text-slate-600",
                       )}
                     >
                       ID Motorista
@@ -1566,7 +1635,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     <div
                       className={cn(
                         "p-4 rounded-xl text-sm font-mono flex justify-between items-center",
-                        theme === "dark" ? "text-orange-200" : "text-slate-700"
+                        theme === "dark" ? "text-orange-200" : "text-slate-700",
                       )}
                       style={{
                         background:
@@ -1595,7 +1664,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     <label
                       className={cn(
                         "text-xs font-bold",
-                        theme === "dark" ? "text-orange-300" : "text-slate-600"
+                        theme === "dark" ? "text-orange-300" : "text-slate-600",
                       )}
                     >
                       Hub
@@ -1613,7 +1682,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                           "w-full p-4 rounded-xl text-sm font-medium border focus:ring-2 focus:ring-orange-500/50 outline-none transition-all",
                           theme === "dark"
                             ? "bg-orange-500/20 border-orange-500/30 text-white placeholder:text-slate-400"
-                            : "bg-orange-50/80 border-orange-200/50 text-slate-800 placeholder:text-slate-500"
+                            : "bg-orange-50/80 border-orange-200/50 text-slate-800 placeholder:text-slate-500",
                         )}
                         placeholder="Pesquisar Hub..."
                       />
@@ -1623,7 +1692,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                             "absolute z-10 w-full mt-2 rounded-xl max-h-48 overflow-y-auto border",
                             theme === "dark"
                               ? "bg-slate-900/98 border-orange-500/40 backdrop-blur-xl"
-                              : "bg-white border-orange-200/50"
+                              : "bg-white border-orange-200/50",
                           )}
                           style={{
                             boxShadow:
@@ -1639,7 +1708,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                                 "p-3 cursor-pointer text-sm transition-colors first:rounded-t-xl last:rounded-b-xl",
                                 theme === "dark"
                                   ? "text-slate-300 hover:text-white hover:bg-orange-500/20"
-                                  : "text-slate-700 hover:text-slate-900 hover:bg-orange-50"
+                                  : "text-slate-700 hover:text-slate-900 hover:bg-orange-50",
                               )}
                               onClick={() => {
                                 setHub(h);
@@ -1659,7 +1728,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     <label
                       className={cn(
                         "text-xs font-bold",
-                        theme === "dark" ? "text-orange-300" : "text-slate-600"
+                        theme === "dark" ? "text-orange-300" : "text-slate-600",
                       )}
                     >
                       Veículo
@@ -1669,7 +1738,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                       onChange={(e) => setVehicleType(e.target.value)}
                       className={cn(
                         "w-full p-4 rounded-xl text-sm font-medium capitalize focus:ring-2 focus:ring-orange-500/50 outline-none transition-all appearance-none cursor-pointer",
-                        theme === "dark" ? "text-white" : "text-slate-800"
+                        theme === "dark" ? "text-white" : "text-slate-800",
                       )}
                       style={{
                         background:
@@ -1700,7 +1769,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     <label
                       className={cn(
                         "text-xs font-bold",
-                        theme === "dark" ? "text-orange-300" : "text-slate-600"
+                        theme === "dark" ? "text-orange-300" : "text-slate-600",
                       )}
                     >
                       Nome
@@ -1712,7 +1781,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                         "w-full p-4 rounded-xl text-sm focus:ring-2 focus:ring-orange-500/50 outline-none transition-all",
                         theme === "dark"
                           ? "text-white placeholder:text-slate-400"
-                          : "text-slate-800 placeholder:text-slate-500"
+                          : "text-slate-800 placeholder:text-slate-500",
                       )}
                       style={{
                         background:
@@ -1731,7 +1800,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     <label
                       className={cn(
                         "text-xs font-bold",
-                        theme === "dark" ? "text-orange-300" : "text-slate-600"
+                        theme === "dark" ? "text-orange-300" : "text-slate-600",
                       )}
                     >
                       Telefone
@@ -1743,7 +1812,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                         "w-full p-4 rounded-xl text-sm focus:ring-2 focus:ring-orange-500/50 outline-none transition-all",
                         theme === "dark"
                           ? "text-white placeholder:text-slate-400"
-                          : "text-slate-800 placeholder:text-slate-500"
+                          : "text-slate-800 placeholder:text-slate-500",
                       )}
                       style={{
                         background:
@@ -1762,7 +1831,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     onClick={handleUpdateProfile}
                     className={cn(
                       "w-full py-4 mt-2 rounded-xl font-bold text-sm transition-all hover:opacity-90",
-                      theme === "dark" ? "text-white" : "text-white"
+                      theme === "dark" ? "text-white" : "text-white",
                     )}
                     style={{
                       background:
@@ -1780,7 +1849,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     "rounded-[1.5rem] p-5 space-y-4 border",
                     theme === "dark"
                       ? "bg-slate-900/40 border-orange-500/30 backdrop-blur-sm"
-                      : "bg-white/80 border-orange-200/50"
+                      : "bg-white/80 border-orange-200/50",
                   )}
                   style={
                     theme === "dark"
@@ -1797,7 +1866,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                   <h4
                     className={cn(
                       "text-xs font-bold uppercase mb-2 tracking-wide",
-                      theme === "dark" ? "text-orange-300" : "text-slate-600"
+                      theme === "dark" ? "text-orange-300" : "text-slate-600",
                     )}
                   >
                     Segurança
@@ -1814,7 +1883,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                           "w-full p-4 rounded-xl text-sm focus:ring-2 focus:ring-orange-500/50 outline-none transition-all",
                           theme === "dark"
                             ? "text-white placeholder:text-slate-400 bg-orange-500/10 border border-orange-500/30"
-                            : "text-slate-800 placeholder:text-slate-500 bg-orange-50/50 border border-orange-200/50"
+                            : "text-slate-800 placeholder:text-slate-500 bg-orange-50/50 border border-orange-200/50",
                         )}
                       />
                       <button
@@ -1824,7 +1893,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                           "absolute right-4 top-4 transition-colors",
                           theme === "dark"
                             ? "text-slate-400 hover:text-white"
-                            : "text-slate-500 hover:text-slate-700"
+                            : "text-slate-500 hover:text-slate-700",
                         )}
                       >
                         {showPassword ? (
@@ -1843,7 +1912,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                         "w-full p-4 rounded-xl text-sm focus:ring-2 focus:ring-orange-500/50 outline-none transition-all",
                         theme === "dark"
                           ? "text-white placeholder:text-slate-400 bg-orange-500/10 border border-orange-500/30"
-                          : "text-slate-800 placeholder:text-slate-500 bg-orange-50/50 border border-orange-200/50"
+                          : "text-slate-800 placeholder:text-slate-500 bg-orange-50/50 border border-orange-200/50",
                       )}
                     />
                     <button
@@ -1852,7 +1921,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                         "w-full py-4 rounded-xl text-sm font-medium transition-all border",
                         theme === "dark"
                           ? "text-slate-300 hover:text-white bg-slate-800/50 border-orange-500/30 hover:bg-orange-500/10"
-                          : "text-slate-700 hover:text-slate-900 bg-white border-orange-200/50 hover:bg-orange-50"
+                          : "text-slate-700 hover:text-slate-900 bg-white border-orange-200/50 hover:bg-orange-50",
                       )}
                     >
                       Atualizar Senha
@@ -1987,7 +2056,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                               handleFieldChange(
                                 idx,
                                 e.target.value,
-                                setDeliveryRegions
+                                setDeliveryRegions,
                               )
                             }
                             className="flex-1 p-2 bg-slate-700/90 backdrop-blur-xl border border-slate-600/50 rounded-xl text-sm text-white placeholder:text-white/50 focus:ring-2 focus:ring-[#FA4F26] outline-none shadow-lg shadow-black/10"
@@ -2026,7 +2095,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                               handleFieldChange(
                                 idx,
                                 e.target.value,
-                                setNeededVehicles
+                                setNeededVehicles,
                               )
                             }
                             className="flex-1 p-2 bg-orange-500/20 backdrop-blur-xl border border-orange-500/30 rounded-xl text-sm capitalize text-white focus:ring-2 focus:ring-[#FA4F26] outline-none shadow-lg shadow-black/10"

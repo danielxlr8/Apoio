@@ -23,6 +23,8 @@ export interface Driver {
   createdAt?: any;
   googleUid?: string;
   shopeeId?: string; // Propriedade para o ID interno da Shopee
+  avatarUpdateCount?: number; // Contador de trocas de foto no mês atual
+  lastAvatarUpdate?: any; // Timestamp da última atualização de foto (Firestore Timestamp)
 }
 
 export interface SupportCall {
