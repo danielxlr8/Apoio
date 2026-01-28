@@ -580,6 +580,31 @@ const CallDetailsModal = ({
             </Button>
           </div>
 
+          {/* CORREÇÃO 6: Mostrar prestador quando chamado foi aceito */}
+          {call.prestador && (
+            <div className="flex items-center justify-between bg-green-50 dark:bg-green-900/10 p-3 rounded-lg border border-green-200 dark:border-green-900/30">
+              <div className="flex items-center gap-3">
+                <AvatarComponent user={call.prestador} />
+                <div>
+                  <p className="font-semibold text-foreground">
+                    {call.prestador.name}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    Prestador (Quem Aceitou)
+                  </p>
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-green-600 border-green-200 hover:bg-green-50"
+                onClick={() => handleContactDriver(call.prestador.phone)}
+              >
+                <Phone size={16} className="mr-2" /> WhatsApp
+              </Button>
+            </div>
+          )}
+
           <p
             className={`font-bold text-sm uppercase ${getStatusColor(
               call.status,
@@ -882,7 +907,8 @@ const ApprovalCard = ({
   onDelete: (call: SupportCall) => void;
   drivers: Driver[];
 }) => {
-  const assignedDriver = drivers.find((d) => d.uid === call.assignedTo);
+  const assignedDriver =
+    call.prestador || drivers.find((d) => d.uid === call.assignedTo);
   const cleanDescription = (desc: string) => {
     if (desc.includes("Aqui está a descrição")) {
       const parts = desc.split('"');

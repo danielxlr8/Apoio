@@ -39,8 +39,8 @@ export const StatusSection: React.FC<StatusSectionProps> = ({
         className={cn(
           "relative overflow-hidden rounded-2xl p-6 border shadow-lg transition-all duration-300 backdrop-blur-xl",
           theme === "dark"
-            ? "bg-slate-800/90 border-orange-500/30"
-            : "bg-white/80 border-orange-200/50"
+            ? "bg-[#1c1917]/95 border-orange-500/20" // <--- CORRIGIDO: Fundo quase preto (Warm Dark)
+            : "bg-white/80 border-orange-200/50",
         )}
       >
         <div
@@ -60,7 +60,7 @@ export const StatusSection: React.FC<StatusSectionProps> = ({
               <h3
                 className={cn(
                   "font-bold text-xl mb-1",
-                  theme === "dark" ? "text-white" : "text-slate-800"
+                  theme === "dark" ? "text-white" : "text-slate-800",
                 )}
               >
                 Status de Operação
@@ -68,7 +68,7 @@ export const StatusSection: React.FC<StatusSectionProps> = ({
               <p
                 className={cn(
                   "text-sm",
-                  theme === "dark" ? "text-slate-300" : "text-slate-600"
+                  theme === "dark" ? "text-white/60" : "text-slate-600",
                 )}
               >
                 Gerencie sua disponibilidade
@@ -80,11 +80,11 @@ export const StatusSection: React.FC<StatusSectionProps> = ({
                 "flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold border",
                 driver.status === "DISPONIVEL"
                   ? theme === "dark"
-                    ? "text-emerald-400 bg-emerald-500/15 border-emerald-500/30"
+                    ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/30"
                     : "text-emerald-600 bg-emerald-500/15 border-emerald-500/30"
                   : theme === "dark"
-                  ? "text-red-400 bg-red-500/15 border-red-500/30"
-                  : "text-red-600 bg-red-500/15 border-red-500/30"
+                    ? "text-red-400 bg-red-500/10 border-red-500/30"
+                    : "text-red-600 bg-red-500/15 border-red-500/30",
               )}
             >
               <div
@@ -92,7 +92,7 @@ export const StatusSection: React.FC<StatusSectionProps> = ({
                   "w-2 h-2 rounded-full animate-pulse",
                   driver.status === "DISPONIVEL"
                     ? "bg-emerald-400"
-                    : "bg-red-400"
+                    : "bg-red-400",
                 )}
               />
               {driver.status === "DISPONIVEL" ? "Online" : "Offline"}
@@ -104,8 +104,8 @@ export const StatusSection: React.FC<StatusSectionProps> = ({
             className={cn(
               "flex gap-3 mb-6 p-1 rounded-xl border",
               theme === "dark"
-                ? "bg-slate-700/50 border-orange-500/30"
-                : "bg-orange-50/80 border-orange-200/50"
+                ? "bg-black/40 border-white/5" // <--- CORRIGIDO: Fundo do switch mais escuro
+                : "bg-orange-50/80 border-orange-200/50",
             )}
           >
             <button
@@ -114,7 +114,7 @@ export const StatusSection: React.FC<StatusSectionProps> = ({
                 "flex-1 py-4 px-6 rounded-xl font-semibold text-sm transition-all duration-300 flex items-center justify-center gap-2",
                 driver.status === "DISPONIVEL"
                   ? "text-white bg-emerald-500 shadow-lg"
-                  : "text-muted-foreground hover:text-foreground hover:bg-accent"
+                  : "text-muted-foreground hover:text-foreground hover:bg-white/5",
               )}
             >
               <CheckCircle size={18} />
@@ -126,7 +126,7 @@ export const StatusSection: React.FC<StatusSectionProps> = ({
                 "flex-1 py-4 px-6 rounded-xl font-semibold text-sm transition-all duration-300 flex items-center justify-center gap-2",
                 driver.status !== "DISPONIVEL"
                   ? "text-white bg-red-500 shadow-lg"
-                  : "text-muted-foreground hover:text-foreground hover:bg-accent"
+                  : "text-muted-foreground hover:text-foreground hover:bg-white/5",
               )}
             >
               <XCircle size={18} />
@@ -139,8 +139,12 @@ export const StatusSection: React.FC<StatusSectionProps> = ({
             className={cn(
               "p-4 rounded-xl border",
               driver.status === "DISPONIVEL"
-                ? "bg-emerald-500/10 border-emerald-500/20"
-                : "bg-red-500/10 border-red-500/20"
+                ? theme === "dark"
+                  ? "bg-emerald-500/5 border-emerald-500/20"
+                  : "bg-emerald-500/10 border-emerald-500/20"
+                : theme === "dark"
+                  ? "bg-red-500/5 border-red-500/20"
+                  : "bg-red-500/10 border-red-500/20",
             )}
           >
             <div className="flex items-start gap-3">
@@ -149,11 +153,11 @@ export const StatusSection: React.FC<StatusSectionProps> = ({
                   "p-2 rounded-lg",
                   driver.status === "DISPONIVEL"
                     ? theme === "dark"
-                      ? "text-emerald-400 bg-emerald-500/15"
+                      ? "text-emerald-400 bg-emerald-500/10"
                       : "text-emerald-600 bg-emerald-500/15"
                     : theme === "dark"
-                    ? "text-red-400 bg-red-500/15"
-                    : "text-red-600 bg-red-500/15"
+                      ? "text-red-400 bg-red-500/10"
+                      : "text-red-600 bg-red-500/15",
                 )}
               >
                 {driver.status === "DISPONIVEL" ? (
@@ -171,8 +175,8 @@ export const StatusSection: React.FC<StatusSectionProps> = ({
                         ? "text-emerald-400"
                         : "text-emerald-600"
                       : theme === "dark"
-                      ? "text-red-400"
-                      : "text-red-600"
+                        ? "text-red-400"
+                        : "text-red-600",
                   )}
                 >
                   {driver.status === "DISPONIVEL"
@@ -182,7 +186,7 @@ export const StatusSection: React.FC<StatusSectionProps> = ({
                 <p
                   className={cn(
                     "text-xs leading-relaxed",
-                    theme === "dark" ? "text-slate-300" : "text-slate-600"
+                    theme === "dark" ? "text-white/60" : "text-slate-600",
                   )}
                 >
                   {driver.status === "DISPONIVEL"
@@ -200,15 +204,15 @@ export const StatusSection: React.FC<StatusSectionProps> = ({
           className={cn(
             "relative overflow-hidden rounded-2xl p-6 border shadow-lg tab-content-enter transition-all duration-300 backdrop-blur-xl",
             theme === "dark"
-              ? "bg-slate-800/90 border-orange-500/30"
-              : "bg-white/80 border-orange-200/50"
+              ? "bg-[#1c1917]/95 border-orange-500/20" // <--- CORRIGIDO: Fundo quase preto também aqui
+              : "bg-white/80 border-orange-200/50",
           )}
         >
           <div className="flex justify-between items-center mb-4">
             <h3
               className={cn(
                 "font-bold text-lg",
-                theme === "dark" ? "text-white" : "text-slate-800"
+                theme === "dark" ? "text-white" : "text-slate-800",
               )}
             >
               Chamados na Região
@@ -226,7 +230,10 @@ export const StatusSection: React.FC<StatusSectionProps> = ({
 
           <div className="relative mb-4">
             <Search
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+              className={cn(
+                "absolute left-3 top-1/2 -translate-y-1/2",
+                theme === "dark" ? "text-white/40" : "text-muted-foreground",
+              )}
               size={18}
             />
             <input
@@ -237,8 +244,8 @@ export const StatusSection: React.FC<StatusSectionProps> = ({
               className={cn(
                 "w-full pl-10 pr-4 py-3 rounded-xl text-sm border outline-none transition-all focus:ring-2 focus:ring-orange-500/50",
                 theme === "dark"
-                  ? "bg-orange-500/20 border-orange-500/30 text-white placeholder:text-slate-400"
-                  : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500"
+                  ? "bg-black/30 border-white/10 text-white placeholder:text-white/30" // <--- Input mais escuro
+                  : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500",
               )}
             />
           </div>
@@ -258,21 +265,21 @@ export const StatusSection: React.FC<StatusSectionProps> = ({
                 className={cn(
                   "text-center py-12 rounded-xl border border-dashed",
                   theme === "dark"
-                    ? "bg-slate-700/50 border-orange-500/30"
-                    : "bg-orange-50/80 border-orange-200/50"
+                    ? "bg-black/20 border-white/10" // <--- Area vazia mais escura
+                    : "bg-orange-50/80 border-orange-200/50",
                 )}
               >
                 <Ticket
                   size={32}
                   className={cn(
                     "mx-auto mb-2",
-                    theme === "dark" ? "text-slate-400" : "text-slate-500"
+                    theme === "dark" ? "text-white/30" : "text-slate-500",
                   )}
                 />
                 <p
                   className={cn(
                     "text-sm",
-                    theme === "dark" ? "text-slate-300" : "text-slate-600"
+                    theme === "dark" ? "text-white/50" : "text-slate-600",
                   )}
                 >
                   Nenhum chamado disponível no momento.

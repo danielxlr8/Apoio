@@ -1,5 +1,13 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import imageCompression from "browser-image-compression";
+import Joyride, {
+  Step,
+  CallBackProps,
+  STATUS,
+  EVENTS,
+  ACTIONS,
+} from "react-joyride";
+import Confetti from "react-confetti";
 import type { Driver, SupportCall, UrgencyLevel } from "../types/logistics";
 import {
   Clock,
@@ -59,11 +67,10 @@ import {
 } from "firebase/auth";
 import {
   ref,
-  uploadBytes, // CORREÇÃO: Usamos apenas uploadBytes (estável)
+  uploadBytesResumable,
   getDownloadURL,
   deleteObject,
 } from "firebase/storage";
-import { increment } from "firebase/firestore";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
 import { cn } from "../lib/utils";
@@ -77,6 +84,7 @@ import { ptBR } from "date-fns/locale";
 // Imports organizados
 import { ProfileHeaderCard, StatusSection } from "./driver";
 import { UrgencyBadge } from "./driver/components/UrgencyBadge";
+import { CustomTooltip } from "./driver/CustomTooltip"; // Assegure-se que este import existe
 import { HUBS } from "../constants/hubs";
 import { VEHICLE_TYPES } from "../constants/vehicleTypes";
 import { SUPPORT_REASONS } from "../constants/supportReasons";
@@ -96,6 +104,7 @@ interface DriverInterfaceProps {
 
 const sessionNotifiedCallIds = new Set<string>();
 
+// DriverCallHistoryCard
 const DriverCallHistoryCard = ({
   call,
   userId,
@@ -106,8 +115,17 @@ const DriverCallHistoryCard = ({
   onDeleteSupportRequest,
 }: any) => {
   const isRequester = call.solicitante.id === userId;
+  const isPrestador = call.prestador?.id === userId;
+
+  // Quem é a outra parte (para contato via WhatsApp)
   const otherPartyId = isRequester ? call.assignedTo : call.solicitante.id;
   const otherParty = allDrivers.find((d: Driver) => d.uid === otherPartyId);
+
+  // Informações do solicitante (sempre disponível)
+  const solicitante = call.solicitante;
+
+  // Informações do prestador (quando chamado foi aceito)
+  const prestador = call.prestador || null;
 
   const handleWhatsAppClick = () => {
     if (!otherParty?.phone)
@@ -219,6 +237,76 @@ const DriverCallHistoryCard = ({
             {call.packageCount || 0} un.
           </span>
         </div>
+
+        {/* CORREÇÃO 6: Mostrar informações do Solicitante */}
+        <div className="col-span-2">
+          <span
+            className={cn(
+              "text-[10px] uppercase font-bold block mb-1",
+              isDark ? "text-white/50" : "text-slate-600",
+            )}
+          >
+            Solicitante
+          </span>
+          <div className="flex items-center gap-2 p-2 rounded-xl bg-blue-500/10 border border-blue-500/30">
+            <User size={14} className="text-blue-600 dark:text-blue-400" />
+            <div className="flex-1">
+              <p
+                className={cn(
+                  "text-xs font-semibold",
+                  isDark ? "text-white" : "text-slate-800",
+                )}
+              >
+                {solicitante.name}
+              </p>
+              <p
+                className={cn(
+                  "text-[10px]",
+                  isDark ? "text-white/60" : "text-slate-600",
+                )}
+              >
+                {formatPhoneNumber(solicitante.phone)}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* CORREÇÃO 6: Mostrar informações do Prestador (quem aceitou) */}
+        {prestador && (
+          <div className="col-span-2">
+            <span
+              className={cn(
+                "text-[10px] uppercase font-bold block mb-1",
+                isDark ? "text-white/50" : "text-slate-600",
+              )}
+            >
+              Prestador (Quem Aceitou)
+            </span>
+            <div className="flex items-center gap-2 p-2 rounded-xl bg-green-500/10 border border-green-500/30">
+              <Truck size={14} className="text-green-600 dark:text-green-400" />
+              <div className="flex-1">
+                <p
+                  className={cn(
+                    "text-xs font-semibold",
+                    isDark ? "text-white" : "text-slate-800",
+                  )}
+                >
+                  {prestador.name}
+                </p>
+                <p
+                  className={cn(
+                    "text-[10px]",
+                    isDark ? "text-white/60" : "text-slate-600",
+                  )}
+                >
+                  {formatPhoneNumber(prestador.phone)}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* CORREÇÃO 4: Mostrar localização do solicitante */}
         <div className="col-span-2">
           <span
             className={cn(
@@ -242,6 +330,7 @@ const DriverCallHistoryCard = ({
             <MapPin size={12} /> {call.location} <ExternalLink size={10} />
           </a>
         </div>
+
         {call.cargoPhotoUrl && (
           <div className="col-span-2 p-2 rounded-xl bg-orange-500/10 dark:bg-orange-500/10 border border-orange-500/30">
             <div className="flex items-center justify-between">
@@ -325,8 +414,6 @@ const DriverCallHistoryCard = ({
   );
 };
 
-// --- COMPONENTE PRINCIPAL ---
-
 export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
   // --- Estados ---
   const [allMyCalls, setAllMyCalls] = useState<SupportCall[]>([]);
@@ -336,8 +423,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
   const [initialTabSet, setInitialTabSet] = useState(false);
   const [isSupportModalOpen, setIsSupportModalOpen] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
-
-  // Estado local para Optimistic UI - atualização instantânea
   const [localDriverStatus, setLocalDriverStatus] = useState<string>(
     driver?.status || "INDISPONIVEL",
   );
@@ -389,19 +474,105 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
   const [endDate, setEndDate] = useState<Date | undefined>(() => new Date());
 
   const [routeIdSearch, setRouteIdSearch] = useState("");
-  // Removed unused state: setGlobalHubFilter
   const globalHubFilter = "Todos os Hubs";
   const [isMuted, setIsMuted] = useState(false);
   const [isProfileWarningVisible, setIsProfileWarningVisible] = useState(true);
   const [acceptingCallId, setAcceptingCallId] = useState<string | null>(null);
 
+  // --- JOYRIDE STATES (TOUR) ---
+  const [runTour, setRunTour] = useState(false);
+  const [tourStepIndex, setTourStepIndex] = useState(0);
+  const [showConfetti, setShowConfetti] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const userId = auth.currentUser?.uid;
   const isInitialOpenCallsLoad = useRef(true);
 
-  // ========================================
-  // SISTEMA DE PRESENÇA - Rastreamento de usuários online
-  // ========================================
+  // --- CONFIGURAÇÃO DOS PASSOS DO TUTORIAL ---
+  const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
+
+  const tourSteps: Step[] = [
+    {
+      target: "body",
+      content:
+        "Olá parceiro! Sou o Shopito. Vou te mostrar como faturar mais com a gente! 🚀",
+      title: "Bem-vindo!",
+      placement: "center",
+      disableBeacon: true,
+      data: { mood: "welcome" },
+    },
+    {
+      target: ".tour-availability-switch",
+      content:
+        "Fique ONLINE aqui para começar a receber rotas. Quando estiver disponível, vamos te conectar com entregas! 💰",
+      title: "Controle de Status",
+      placement: "auto",
+      data: { mood: "point-right" },
+    },
+    // PASSO DE PREVISÃO DO TEMPO (SIMPLIFICADO E ESTÁTICO)
+    {
+      target: "#weather-card-container",
+      content:
+        "Aqui você vê a previsão semanal. Se quiser detalhes, basta clicar no card para expandir.",
+      title: "Previsão do Tempo",
+      placement: "auto",
+      data: { mood: "point-right" },
+      spotlightPadding: 10,
+    },
+    {
+      target: ".tour-support-button",
+      content:
+        "⚠️ ATENÇÃO! Use isso APENAS em emergências reais com a carga. Não abuse, pois precisamos garantir que todos sejam atendidos!",
+      title: "Socorro de Emergência",
+      placement: "auto",
+      data: { mood: "angry" },
+    },
+    {
+      target: ".tour-history-section",
+      content:
+        "Aqui você acompanha seu sucesso e suas entregas finalizadas. Quanto mais você trabalha, mais você ganha! 📊",
+      title: "Seu Histórico",
+      placement: "auto",
+      data: { mood: "ok" },
+    },
+    {
+      target: ".tour-profile-section",
+      content:
+        "Mantenha seus dados atualizados e sua senha segura aqui nesta aba.",
+      title: "Seu Perfil",
+      placement: "auto",
+      data: { mood: "point-right" },
+    },
+    // PASSO DO CHATBOT (COM TARGET FIXO)
+    {
+      target: "#chatbot-tour-target",
+      content:
+        "Suporte 24hrs qualquer duvida é só falar comigo estou aqui para te auxiliar.",
+      title: "Suporte 24H",
+      placement: isMobile ? "top" : "left",
+      data: { mood: "chicken" },
+      spotlightPadding: 5,
+      styles: {
+        overlay: {
+          backgroundColor: "transparent",
+          mixBlendMode: "normal",
+        },
+        spotlight: {
+          backgroundColor: "transparent",
+        },
+      },
+    },
+    {
+      target: "body",
+      content:
+        "Tudo pronto! Agradecimentos especiais a Bruno Aschwanden pela criação dos mascotes! 🎉",
+      title: "Vamos Começar!",
+      placement: "center",
+      data: { mood: "celebrate" },
+    },
+  ];
+
+  // --- HOOKS ---
   usePresence(
     userId || null,
     "driver",
@@ -411,7 +582,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
           email: auth.currentUser?.email || "",
         }
       : null,
-    true, // Sempre ativo para motoristas
+    true,
   );
 
   const TABS = useMemo(
@@ -445,15 +616,19 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     );
   }, [driver, shopeeId]);
 
+  // LOGICA ADICIONADA: Verifica status ABERTO, EM ANDAMENTO ou AGUARDANDO_APROVACAO
   const activeCallForDriver = useMemo(() => {
     return (
       allMyCalls.find(
-        (call) => call.solicitante.id === userId && call.status === "ABERTO",
+        (call) =>
+          call.solicitante.id === userId &&
+          ["ABERTO", "EM ANDAMENTO", "AGUARDANDO_APROVACAO"].includes(
+            call.status,
+          ),
       ) || null
     );
   }, [allMyCalls, userId]);
 
-  // Driver com status local para Optimistic UI
   const driverWithLocalStatus = useMemo(() => {
     return {
       ...driver,
@@ -493,14 +668,14 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     () =>
       openSupportCalls.filter(
         (c) =>
+          // CORREÇÃO 3: Não mostrar chamados do próprio motorista
+          c.solicitante.id !== userId &&
           (globalHubFilter === "Todos os Hubs" || c.hub === globalHubFilter) &&
           (!routeIdSearch ||
             c.routeId?.toLowerCase().includes(routeIdSearch.toLowerCase())),
       ),
-    [openSupportCalls, routeIdSearch, globalHubFilter],
+    [openSupportCalls, routeIdSearch, globalHubFilter, userId],
   );
-
-  // Removed unused variable: allHubs
 
   // --- Efeitos ---
   useEffect(() => {
@@ -508,7 +683,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     setTheme(isDark ? "dark" : "light");
   }, []);
 
-  // Atualizar data/hora do Brasil
   useEffect(() => {
     const updateDateTime = () => {
       const brazilTime = new Date(
@@ -526,14 +700,13 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
   const toggleTheme = () => {
     const root = window.document.documentElement;
     const newTheme = theme === "light" ? "dark" : "light";
-
-    // Aplicar tema imediatamente para animação
     root.classList.remove("light", "dark");
     root.classList.add(newTheme);
     setTheme(newTheme);
     localStorage.setItem("theme", newTheme);
   };
 
+  // Trava de segurança e redirecionamento inicial
   useEffect(() => {
     if (isProfileComplete && !initialTabSet) {
       setActiveTab("availability");
@@ -544,6 +717,18 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     }
   }, [isProfileComplete, initialTabSet]);
 
+  // Se o tour não está rodando e o perfil está incompleto, força ir para o perfil
+  useEffect(() => {
+    if (!isProfileComplete && !runTour && activeTab !== "profile") {
+      setActiveTab("profile");
+      showNotification(
+        "error",
+        "Perfil Incompleto",
+        "Por favor, preencha seus dados para liberar o acesso.",
+      );
+    }
+  }, [isProfileComplete, runTour, activeTab]);
+
   useEffect(() => {
     if (driver) {
       setName(driver.name || "");
@@ -551,10 +736,66 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       setHub(driver.hub || "");
       setVehicleType(driver.vehicleType || "");
       setHubSearch(driver.hub || "");
-      // Sincronizar status local com o driver
       setLocalDriverStatus(driver.status || "INDISPONIVEL");
     }
   }, [driver]);
+
+  // INICIA O TOUR
+  useEffect(() => {
+    if (!userId || !driver) return;
+
+    // Versão da chave de tour (v35)
+    const tourKey = `driver-tour-seen-v35-${userId}`;
+    const hasSeenTour = localStorage.getItem(tourKey);
+
+    if (!hasSeenTour) {
+      setTimeout(() => setRunTour(true), 2000);
+    }
+  }, [driver, userId]);
+
+  // --- CALLBACK JOYRIDE ---
+  const handleJoyrideCallback = (data: CallBackProps) => {
+    const { status, type, index, action } = data;
+    const finishedStatuses: string[] = [STATUS.FINISHED, STATUS.SKIPPED];
+
+    if (type === EVENTS.STEP_AFTER) {
+      if (action === ACTIONS.NEXT) {
+        const nextIndex = index + 1;
+
+        // Navegação simples entre abas baseada no índice do passo
+        if (nextIndex === 1) setActiveTab("availability"); // Switch
+        if (nextIndex === 2) setActiveTab("availability"); // Clima
+        if (nextIndex === 3) setActiveTab("support"); // Botão Socorro
+        if (nextIndex === 4) setActiveTab("activeCalls"); // Histórico
+        if (nextIndex === 5) setActiveTab("profile"); // Perfil
+
+        setTimeout(() => {
+          setTourStepIndex(nextIndex);
+        }, 400);
+      }
+
+      if (action === ACTIONS.PREV) {
+        const prevIndex = index - 1;
+        if (prevIndex === 1) setActiveTab("availability");
+        if (prevIndex === 2) setActiveTab("availability");
+        if (prevIndex === 3) setActiveTab("support");
+        if (prevIndex === 4) setActiveTab("activeCalls");
+        if (prevIndex === 5) setActiveTab("profile");
+        setTimeout(() => setTourStepIndex(prevIndex), 400);
+      }
+    }
+
+    if (finishedStatuses.includes(status)) {
+      setRunTour(false);
+      if (userId) {
+        localStorage.setItem(`driver-tour-seen-v35-${userId}`, "true");
+      }
+      if (status === STATUS.FINISHED) {
+        setShowConfetti(true);
+        setTimeout(() => setShowConfetti(false), 8000);
+      }
+    }
+  };
 
   useEffect(() => {
     const fetchShopeeId = async () => {
@@ -708,7 +949,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       const openCallsData = snapshot.docs.map(
         (doc) => ({ id: doc.id, ...doc.data() }) as SupportCall,
       );
-      // CORREÇÃO BUG 2: Bloquear motorista de ver o próprio chamado
       setOpenSupportCalls(
         openCallsData.filter((call) => call.solicitante.id !== userId),
       );
@@ -734,6 +974,13 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     updates: Partial<Omit<SupportCall, "id">>,
   ) => {
     await updateDoc(doc(db, "supportCalls", id), updates as any);
+  };
+
+  const addNewCall = async (newCall: any) => {
+    await addDoc(collection(db, "supportCalls"), {
+      ...newCall,
+      timestamp: serverTimestamp(),
+    });
   };
 
   // --- HANDLERS ---
@@ -771,15 +1018,21 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
         "Verifique seus dados.",
       );
 
-    // OPTIMISTIC UI: Atualizar estado local IMEDIATAMENTE
+    // CORREÇÃO 2: Verificar se tem chamado aberto como solicitante
+    if (isAvailable && activeCallForDriver) {
+      return showNotification(
+        "error",
+        "Chamado Ativo",
+        "Você tem uma solicitação de apoio em aberto. Não pode ficar disponível para aceitar rotas.",
+      );
+    }
+
     const newStatus = isAvailable ? "DISPONIVEL" : "INDISPONIVEL";
     setLocalDriverStatus(newStatus);
 
-    // Depois atualizar no Firebase (não esperamos a resposta)
     try {
       await updateDriver(shopeeId, { status: newStatus });
     } catch (error) {
-      // Se falhar, reverter o estado local
       setLocalDriverStatus(driver.status || "INDISPONIVEL");
       showNotification("error", "Erro", "Falha ao atualizar status.");
     }
@@ -792,14 +1045,24 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       return showNotification("error", "Ocupado", "Você já está em rota.");
     setAcceptingCallId(callId);
 
-    // OPTIMISTIC UI: Atualizar status local para EM_ROTA imediatamente
     setLocalDriverStatus("EM_ROTA");
 
     try {
-      await updateCall(callId, { assignedTo: userId, status: "EM ANDAMENTO" });
+      // CORREÇÃO 5: Salvar informações do prestador (quem aceitou)
+      await updateCall(callId, {
+        assignedTo: userId,
+        status: "EM ANDAMENTO",
+        prestador: {
+          id: driver.uid,
+          name: driver.name,
+          avatar: driver.avatar || null,
+          initials:
+            driver.initials || driver.name?.charAt(0).toUpperCase() || "M",
+          phone: driver.phone,
+        },
+      } as any);
       await updateDriver(shopeeId, { status: "EM_ROTA" });
     } catch {
-      // Se falhar, reverter o status
       setLocalDriverStatus(driver.status || "INDISPONIVEL");
       showNotification("error", "Erro", "Falha ao aceitar.");
     } finally {
@@ -818,7 +1081,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
   const handleCancelSupport = async (id: string) => {
     if (!userId || !shopeeId) return;
 
-    // OPTIMISTIC UI: Atualizar status local para DISPONIVEL imediatamente
     setLocalDriverStatus("DISPONIVEL");
 
     try {
@@ -829,7 +1091,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       await updateDriver(shopeeId, { status: "DISPONIVEL" });
       showNotification("success", "Cancelado", "Apoio cancelado.");
     } catch {
-      // Se falhar, reverter o status
       setLocalDriverStatus(driver.status || "INDISPONIVEL");
       showNotification("error", "Erro", "Falha ao cancelar.");
     }
@@ -892,99 +1153,30 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    const user = auth.currentUser;
-
     if (!file || !shopeeId) return;
-
-    try {
-      setIsUploading(true);
-
-      // 1. VERIFICAÇÃO DE LIMITE DE TROCAS
-      const driverDoc = doc(db, "motoristas_pre_aprovados", shopeeId);
-      const currentCount = driver.avatarUpdateCount || 0;
-      const lastUpdate = driver.lastAvatarUpdate;
-
-      const now = new Date();
-
-      let resetCounter = false;
-      if (lastUpdate) {
-        const lastUpdateDate = lastUpdate.toDate();
-        const lastMonth = lastUpdateDate.getMonth();
-        const lastYear = lastUpdateDate.getFullYear();
-        const currentMonth = now.getMonth();
-        const currentYear = now.getFullYear();
-
-        // Se mudou de mês ou ano, resetar contador
-        if (
-          currentYear > lastYear ||
-          (currentYear === lastYear && currentMonth > lastMonth)
-        ) {
-          resetCounter = true;
-        }
-      }
-
-      if (!resetCounter && currentCount >= 3) {
-        setIsUploading(false);
-        showNotification(
-          "error",
-          "Limite Atingido",
-          "Você pode trocar a foto de perfil no máximo 3 vezes por mês. Aguarde o próximo mês.",
-        );
-        return;
-      }
-
-      // 2. COMPRESSÃO DA IMAGEM
-      showNotification("info", "Processando", "Comprimindo imagem...");
-
-      const compressionOptions = {
-        maxWidthOrHeight: 500,
-        maxSizeMB: 0.1, // 100KB
-        fileType: "image/jpeg" as const,
-        useWebWorker: true,
-      };
-
-      const compressedBlob = await imageCompression(file, compressionOptions);
-
-      // 3. CONVERSÃO PARA ARRAY BUFFER (CORREÇÃO ERRO 412/Unknown)
-      // O Firebase aceita ArrayBuffer de forma muito mais confiável do que Blob em alguns browsers
-      const fileBuffer = await compressedBlob.arrayBuffer();
-
-      // 4. UPLOAD COM NOME ÚNICO
-      // Adicionamos um timestamp no nome para garantir que é um arquivo novo
-      const fileName = `avatar_${Date.now()}.jpg`;
-      const storageRef = ref(storage, `avatars/${shopeeId}/${fileName}`);
-
-      const metadata = { contentType: "image/jpeg" };
-
-      await uploadBytes(storageRef, fileBuffer, metadata);
-      const url = await getDownloadURL(storageRef);
-
-      // 5. ATUALIZAR FIRESTORE
-      const updates: any = {
-        avatar: url,
-        lastAvatarUpdate: serverTimestamp(),
-      };
-
-      if (resetCounter) {
-        updates.avatarUpdateCount = 1;
-      } else {
-        updates.avatarUpdateCount = increment(1);
-      }
-
-      await updateDoc(driverDoc, updates);
-
-      setIsUploading(false);
-      const remainingChanges = resetCounter ? 2 : 2 - currentCount;
-      showNotification(
-        "success",
-        "Foto Atualizada!",
-        `Você ainda pode trocar ${remainingChanges} vez(es) este mês.`,
-      );
-    } catch (error: any) {
-      setIsUploading(false);
-      console.error(error);
-      showNotification("error", "Erro", error.message || "Erro no upload.");
+    setIsUploading(true);
+    if (driver.avatar) {
+      try {
+        await deleteObject(ref(storage, driver.avatar));
+      } catch {}
     }
+    const storageRef = ref(storage, `avatars/${shopeeId}/avatar.jpg`);
+    const uploadTask = uploadBytesResumable(storageRef, file);
+    uploadTask.on(
+      "state_changed",
+      null,
+      (err) => {
+        setIsUploading(false);
+        showNotification("error", "Erro", err.message);
+      },
+      () => {
+        getDownloadURL(uploadTask.snapshot.ref).then((url) => {
+          updateDriver(shopeeId, { avatar: url });
+          setIsUploading(false);
+          showNotification("success", "Foto", "Atualizada com sucesso.");
+        });
+      },
+    );
   };
 
   const handleGetLocation = () => {
@@ -1033,6 +1225,15 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       return;
     }
 
+    // CORREÇÃO 1: Verificar se já tem chamado aberto
+    if (activeCallForDriver) {
+      setModalError(
+        "Você já tem uma solicitação de apoio em aberto. Aguarde a conclusão antes de criar outra.",
+      );
+      setIsSubmitting(false);
+      return;
+    }
+
     const pkg = Number(packageCount);
     const regions = deliveryRegions.filter(Boolean);
     const vehicles = neededVehicles.filter(Boolean);
@@ -1063,10 +1264,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
           storage,
           `cargo-photos/${user.uid}/${Date.now()}_${cargoPhoto.name}`,
         );
-
-        const metadata = { contentType: cargoPhoto.type || "image/jpeg" };
-        await uploadBytes(photoRef, cargoPhoto, metadata);
-
+        await uploadBytesResumable(photoRef, cargoPhoto);
         cargoPhotoUrl = await getDownloadURL(photoRef);
       } catch (err: any) {
         setModalError("Erro ao fazer upload da foto: " + err.message);
@@ -1093,7 +1291,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       const newCall = {
         routeId: `SPX-${Date.now().toString().slice(-6)}`,
         description: professionalDesc,
-        reason,
         urgency,
         location,
         status: "ABERTO",
@@ -1103,7 +1300,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
         packageCount: pkg,
         deliveryRegions: regions,
         cargoPhotoUrl,
-        timestamp: serverTimestamp(),
         solicitante: {
           id: driver.uid,
           name: driver.name,
@@ -1114,7 +1310,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
         },
       };
 
-      await addDoc(collection(db, "supportCalls"), newCall);
+      await addNewCall(newCall);
       setIsSupportModalOpen(false);
       setShowSuccessModal(true);
       setDeliveryRegions([""]);
@@ -1138,6 +1334,37 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
         isLoading={isSubmitting || isReauthenticating}
         text="Processando..."
       />
+
+      <Joyride
+        steps={tourSteps}
+        run={runTour}
+        stepIndex={tourStepIndex}
+        continuous
+        showProgress
+        showSkipButton
+        disableOverlayClose={true}
+        tooltipComponent={CustomTooltip}
+        callback={handleJoyrideCallback}
+        // === CONFIGURAÇÕES GLOBAIS ===
+        scrollOffset={isMobile ? 120 : 130}
+        disableScrollParentFix={false}
+        spotlightClicks={true} // Permite clicar se quiser expandir
+        floaterProps={{
+          disableAnimation: true,
+          offset: 24,
+        }}
+        spotlightPadding={10}
+        disableOverlay={!runTour}
+        styles={{
+          options: {
+            zIndex: 10000,
+            primaryColor: "#EE4D2D",
+          },
+        }}
+      />
+
+      {showConfetti && <Confetti numberOfPieces={500} recycle={false} />}
+
       <div
         className="min-h-dvh font-sans pb-24 transition-colors duration-300"
         style={{
@@ -1218,14 +1445,16 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
               <Loading size="lg" variant="spinner" text="Enviando imagem..." />
             </div>
           )}
-          <ProfileHeaderCard
-            driver={driverWithLocalStatus}
-            isUploading={isUploading}
-            onEditClick={() => fileInputRef.current?.click()}
-            activeCall={activeCallForDriver}
-            theme={theme}
-            currentDateTime={currentDateTime}
-          />
+          <div id="weather-card-container">
+            <ProfileHeaderCard
+              driver={driverWithLocalStatus}
+              isUploading={isUploading}
+              onEditClick={() => fileInputRef.current?.click()}
+              activeCall={activeCallForDriver}
+              theme={theme}
+              currentDateTime={currentDateTime}
+            />
+          </div>
           <input
             type="file"
             ref={fileInputRef}
@@ -1243,38 +1472,49 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                 : "bg-slate-900/40 backdrop-blur-xl border-orange-500/30",
             )}
           >
-            {TABS.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id as TabId)}
-                className={cn(
-                  "flex-1 flex flex-col items-center py-3 px-2 rounded-xl text-[10px] sm:text-xs uppercase font-bold tracking-wide min-w-[60px] sm:min-w-[80px] transition-all duration-300 ease-in-out",
-                  activeTab === tab.id
-                    ? "text-white bg-primary shadow-lg scale-105"
-                    : theme === "light"
-                      ? "text-slate-700 hover:text-slate-900 hover:bg-orange-50/80"
-                      : "text-slate-300 hover:text-white hover:bg-orange-500/20",
-                )}
-              >
-                <div className="transition-transform duration-300">
-                  {React.cloneElement(tab.icon, {
-                    size: 20,
-                    className: cn(
-                      "mb-1 transition-all duration-300",
-                      activeTab === tab.id && "scale-110",
-                    ),
-                  })}
-                </div>
-                <span className="hidden sm:inline">{tab.label}</span>
-                <span className="sm:hidden">{tab.label.split(" ")[0]}</span>
-              </button>
-            ))}
+            {TABS.map((tab) => {
+              // Bloqueia se perfil incompleto E não for a aba de perfil
+              const isDisabled = !isProfileComplete && tab.id !== "profile";
+
+              return (
+                <button
+                  key={tab.id}
+                  disabled={isDisabled}
+                  onClick={() => !isDisabled && setActiveTab(tab.id as TabId)}
+                  className={cn(
+                    "flex-1 flex flex-col items-center py-3 px-2 rounded-xl text-[10px] sm:text-xs uppercase font-bold tracking-wide min-w-[60px] sm:min-w-[80px] transition-all duration-300 ease-in-out",
+                    activeTab === tab.id
+                      ? "text-white bg-primary shadow-lg scale-105"
+                      : theme === "light"
+                        ? "text-slate-700 hover:text-slate-900 hover:bg-orange-50/80"
+                        : "text-slate-300 hover:text-white hover:bg-orange-500/20",
+                    isDisabled && "opacity-40 grayscale cursor-not-allowed",
+                  )}
+                >
+                  <div className="transition-transform duration-300">
+                    {isDisabled ? (
+                      <Lock size={20} className="text-slate-400 mb-1" />
+                    ) : (
+                      React.cloneElement(tab.icon, {
+                        size: 20,
+                        className: cn(
+                          "mb-1 transition-all duration-300",
+                          activeTab === tab.id && "scale-110",
+                        ),
+                      })
+                    )}
+                  </div>
+                  <span className="hidden sm:inline">{tab.label}</span>
+                  <span className="sm:hidden">{tab.label.split(" ")[0]}</span>
+                </button>
+              );
+            })}
           </div>
 
           {/* TAB CONTENT AREAS */}
           <div className="min-h-[400px]">
             {activeTab === "availability" && (
-              <div className="tab-content-enter">
+              <div className="tab-content-enter tour-availability-switch">
                 <StatusSection
                   driver={driverWithLocalStatus}
                   onAvailabilityChange={handleAvailabilityChange}
@@ -1303,10 +1543,19 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                 </div>
                 <Button
                   onClick={() => {
+                    // LOGICA ADICIONADA: Se tiver chamado ativo, avisa e não abre o modal
+                    if (activeCallForDriver) {
+                      showNotification(
+                        "error",
+                        "Atenção",
+                        "Você já possui um chamado ativo ou em andamento. Finalize-o antes de criar um novo.",
+                      );
+                      return;
+                    }
                     setModalError("");
                     setIsSupportModalOpen(true);
                   }}
-                  className="w-full max-w-sm h-14 text-lg bg-primary hover:bg-primary/90 font-bold shadow-xl shadow-primary/30 rounded-xl text-primary-foreground"
+                  className="w-full max-w-sm h-14 text-lg bg-primary hover:bg-primary/90 font-bold shadow-xl shadow-primary/30 rounded-xl text-primary-foreground tour-support-button"
                 >
                   SOLICITAR SOCORRO
                 </Button>
@@ -1314,7 +1563,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
             )}
 
             {activeTab === "activeCalls" && (
-              <div className="tab-content-enter space-y-4">
+              <div className="tab-content-enter space-y-4 tour-history-section">
                 <div className="flex gap-2 overflow-x-auto pb-2">
                   {["all", "inProgress", "requester", "provider"].map((f) => (
                     <button
@@ -1515,7 +1764,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
             )}
 
             {activeTab === "profile" && (
-              <div className="tab-content-enter space-y-6 pb-10">
+              <div className="tab-content-enter space-y-6 pb-10 tour-profile-section">
                 {/* Configurações */}
                 <section
                   className={cn(
@@ -1880,10 +2129,10 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                         onChange={(e) => setNewPassword(e.target.value)}
                         placeholder="Nova Senha"
                         className={cn(
-                          "w-full p-4 rounded-xl text-sm focus:ring-2 focus:ring-orange-500/50 outline-none transition-all",
+                          "w-full p-4 rounded-xl text-sm border pr-12",
                           theme === "dark"
-                            ? "text-white placeholder:text-slate-400 bg-orange-500/10 border border-orange-500/30"
-                            : "text-slate-800 placeholder:text-slate-500 bg-orange-50/50 border border-orange-200/50",
+                            ? "bg-slate-700 border-slate-600 text-white placeholder:text-white/50"
+                            : "bg-white border-slate-300 text-slate-900",
                         )}
                       />
                       <button
@@ -1909,19 +2158,20 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                       onChange={(e) => setConfirmPassword(e.target.value)}
                       placeholder="Confirmar Nova Senha"
                       className={cn(
-                        "w-full p-4 rounded-xl text-sm focus:ring-2 focus:ring-orange-500/50 outline-none transition-all",
+                        "w-full p-4 rounded-xl text-sm border",
                         theme === "dark"
-                          ? "text-white placeholder:text-slate-400 bg-orange-500/10 border border-orange-500/30"
-                          : "text-slate-800 placeholder:text-slate-500 bg-orange-50/50 border border-orange-200/50",
+                          ? "bg-slate-700 border-slate-600 text-white placeholder:text-white/50"
+                          : "bg-white border-slate-300 text-slate-900",
                       )}
                     />
                     <button
                       onClick={handleChangePassword}
+                      disabled={!newPassword || !confirmPassword}
                       className={cn(
-                        "w-full py-4 rounded-xl text-sm font-medium transition-all border",
+                        "w-full py-4 rounded-xl text-sm font-medium border transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
                         theme === "dark"
-                          ? "text-slate-300 hover:text-white bg-slate-800/50 border-orange-500/30 hover:bg-orange-500/10"
-                          : "text-slate-700 hover:text-slate-900 bg-white border-orange-200/50 hover:bg-orange-50",
+                          ? "border-slate-600 text-white bg-slate-700 hover:bg-slate-600"
+                          : "border-slate-300 text-slate-700 bg-white hover:bg-slate-50",
                       )}
                     >
                       Atualizar Senha
@@ -1932,7 +2182,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
             )}
           </div>
 
-          {/* SUPPORT MODAL */}
+          {/* === MODAL RESTAURADO (COM TODOS OS CAMPOS E ESTILO) === */}
           {isSupportModalOpen && (
             <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4">
               <div
@@ -2239,64 +2489,47 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
             </div>
           )}
 
-          {/* REAUTH MODAL */}
           {isReauthModalOpen && (
-            <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-slate-900/90 backdrop-blur-sm animate-in fade-in">
-              <div className="bg-slate-800/95 backdrop-blur-2xl rounded-3xl p-6 w-full max-w-sm shadow-2xl shadow-black/40 border border-orange-500/30">
-                <h3 className="font-bold text-lg mb-4 text-white">
-                  Confirme sua senha atual
-                </h3>
+            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-6">
+              <div className="bg-white p-6 rounded-2xl w-full max-w-sm">
+                <h3 className="font-bold text-lg mb-4">Senha</h3>
                 <input
                   type="password"
                   value={currentPassword}
                   onChange={(e) => setCurrentPassword(e.target.value)}
-                  className="w-full p-3 bg-slate-700/90 backdrop-blur-xl border border-slate-600/50 rounded-xl mb-2 text-white placeholder:text-white/50 focus:ring-2 focus:ring-[#FA4F26] outline-none shadow-lg shadow-black/10"
+                  className="w-full p-3 border rounded-xl"
                   placeholder="Senha atual"
                 />
-                {reauthError && (
-                  <p className="text-red-300 text-xs mb-2">{reauthError}</p>
-                )}
-                <div className="flex gap-2">
+                <div className="flex gap-2 mt-4">
                   <Button
-                    variant="outline"
+                    variant="ghost"
                     onClick={() => setIsReauthModalOpen(false)}
-                    className="flex-1 border-slate-600/50 text-white hover:bg-slate-700/90 hover:text-white backdrop-blur-xl rounded-xl"
+                    className="flex-1"
                   >
                     Cancelar
                   </Button>
                   <Button
                     onClick={handleReauthenticateAndChange}
-                    disabled={isReauthenticating}
-                    className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl shadow-lg shadow-primary/30"
+                    className="flex-1"
                   >
-                    {isReauthenticating ? (
-                      <Loading size="sm" variant="spinner" />
-                    ) : (
-                      "Confirmar"
-                    )}
+                    Confirmar
                   </Button>
                 </div>
               </div>
             </div>
           )}
 
-          {/* SUCCESS MODAL */}
           {showSuccessModal && (
-            <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-slate-900/90 backdrop-blur-sm animate-in fade-in">
-              <div className="bg-slate-800/95 backdrop-blur-2xl rounded-3xl p-8 text-center max-w-sm w-full shadow-2xl shadow-black/40 border border-orange-500/30">
-                <div className="w-20 h-20 bg-green-500/20 text-green-300 rounded-full flex items-center justify-center mx-auto mb-4 border border-green-400/30 shadow-xl shadow-black/20">
-                  <CheckCircle size={40} />
-                </div>
-                <h2 className="text-2xl font-bold text-white mb-2">
-                  Recebido!
-                </h2>
-                <p className="text-white/70 mb-6">
-                  Sua solicitação está visível no painel. Aguarde um monitor
-                  aceitar.
-                </p>
+            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-6">
+              <div className="bg-white p-8 rounded-2xl text-center w-full max-w-sm">
+                <CheckCircle
+                  size={40}
+                  className="mx-auto text-green-500 mb-4"
+                />
+                <h2 className="text-2xl font-bold mb-2">Recebido!</h2>
                 <Button
                   onClick={() => setShowSuccessModal(false)}
-                  className="w-full bg-[#FA4F26] hover:bg-[#EE4D2D] text-white h-12 font-bold rounded-xl shadow-xl shadow-orange-500/30"
+                  className="w-full mt-4"
                 >
                   Entendido
                 </Button>
@@ -2304,6 +2537,13 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
             </div>
           )}
         </main>
+
+        {/* CHATBOT TARGET GHOST */}
+        <div
+          id="chatbot-tour-target"
+          className="fixed bottom-0 right-0 w-20 h-20 pointer-events-none z-0"
+        />
+
         <Chatbot />
       </div>
     </>
