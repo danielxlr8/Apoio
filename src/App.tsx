@@ -14,6 +14,9 @@ import {
   writeBatch,
   serverTimestamp,
   setDoc,
+  onSnapshot,
+  orderBy,
+  limit,
 } from "firebase/firestore";
 import { AuthPage } from "./components/AuthPage";
 import { AdminDashboard } from "./components/AdminDashboard";
@@ -26,7 +29,6 @@ import type {
   SupportCall as OriginalSupportCall,
   Driver,
 } from "./types/logistics";
-import { useFirestoreQuery, clearCollectionCache } from "./hooks/useFirestoreQuery";
 import { usePresence } from "./hooks/usePresence";
 import { checkAccessPermission } from "./services/gatekeeper";
 
@@ -66,39 +68,93 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [isAdminUnverified, setIsAdminUnverified] = useState(false);
 
-  const {
-    data: calls,
-    loading: callsLoading,
-    error: callsError,
-    refresh: refreshCalls,
-  } = useFirestoreQuery<SupportCall>({
-    collectionName: "supportCalls",
-    orderByField: "timestamp", // CORREÇÃO BUG 1: Usar timestamp em vez de createdAt
-    orderDirection: "desc",
-    limitCount: 100,
-    enableCache: true,
-    cacheDuration: 2 * 60 * 1000,
-  });
+  const [calls, setCalls] = useState<SupportCall[]>([]);
+  const [callsLoading, setCallsLoading] = useState(true);
+  const [callsError, setCallsError] = useState<Error | null>(null);
 
-  const {
-    data: drivers,
-    loading: driversLoading,
-    error: driversError,
-    refresh: refreshDrivers,
-  } = useFirestoreQuery<Driver>({
-    collectionName: "motoristas_pre_aprovados",
-    orderByField: "name",
-    orderDirection: "asc",
-    limitCount: 200,
-    enableCache: true,
-    cacheDuration: 5 * 60 * 1000,
-  });
+  // TEMPO REAL: Usar onSnapshot para receber atualizações instantâneas
+  useEffect(() => {
+    setCallsLoading(true);
+
+    const q = query(
+      collection(db, "supportCalls"),
+      orderBy("timestamp", "desc"),
+      limit(100),
+    );
+
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const callsData = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        })) as SupportCall[];
+
+        setCalls(callsData);
+        setCallsLoading(false);
+        setCallsError(null);
+      },
+      (error) => {
+        console.error("Erro ao carregar chamados:", error);
+        setCallsError(error as Error);
+        setCallsLoading(false);
+      },
+    );
+
+    return () => unsubscribe();
+  }, []);
+
+  const refreshCalls = () => {
+    // Com onSnapshot, não precisa refresh manual, mas mantemos a função para compatibilidade
+    console.log("Chamados já estão em tempo real");
+  };
+
+  const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [driversLoading, setDriversLoading] = useState(true);
+  const [driversError, setDriversError] = useState<Error | null>(null);
+
+  // TEMPO REAL: Usar onSnapshot para receber atualizações instantâneas dos motoristas
+  useEffect(() => {
+    setDriversLoading(true);
+
+    const q = query(
+      collection(db, "motoristas_pre_aprovados"),
+      orderBy("name", "asc"),
+      limit(200),
+    );
+
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const driversData = snapshot.docs.map((doc) => ({
+          uid: doc.id,
+          ...doc.data(),
+        })) as Driver[];
+
+        setDrivers(driversData);
+        setDriversLoading(false);
+        setDriversError(null);
+      },
+      (error) => {
+        console.error("Erro ao carregar motoristas:", error);
+        setDriversError(error as Error);
+        setDriversLoading(false);
+      },
+    );
+
+    return () => unsubscribe();
+  }, []);
+
+  const refreshDrivers = () => {
+    // Com onSnapshot, não precisa refresh manual, mas mantemos a função para compatibilidade
+    console.log("Motoristas já estão em tempo real");
+  };
 
   usePresence(
     user?.uid || null,
     userData?.role || "driver",
     userData ? { name: userData.name, email: userData.email } : null,
-    !!user && !!userData
+    !!user && !!userData,
   );
 
   useEffect(() => {
@@ -120,17 +176,18 @@ function App() {
 
           const accessCheck = await Promise.race([
             checkAccessPermission(currentUser.email || undefined),
-            new Promise<any>((resolve) => 
+            new Promise<any>((resolve) =>
               setTimeout(() => {
                 console.warn("Gatekeeper timeout, allowing access");
                 resolve({ allowed: true });
-              }, 5000)
-            )
+              }, 5000),
+            ),
           ]);
 
           if (!accessCheck.allowed) {
             sonnerToast.error("Servidor Cheio", {
-              description: accessCheck.reason || "Tente novamente em instantes.",
+              description:
+                accessCheck.reason || "Tente novamente em instantes.",
               duration: 5000,
             });
 
@@ -154,7 +211,11 @@ function App() {
               return;
             }
 
-            const adminDocRef = doc(db, "admins_pre_aprovados", currentUser.uid);
+            const adminDocRef = doc(
+              db,
+              "admins_pre_aprovados",
+              currentUser.uid,
+            );
             const adminDocSnap = await getDoc(adminDocRef);
 
             if (adminDocSnap.exists()) {
@@ -174,7 +235,7 @@ function App() {
             const qUid = query(driversRef, where("uid", "==", currentUser.uid));
             const qGoogleUid = query(
               driversRef,
-              where("googleUid", "==", currentUser.uid)
+              where("googleUid", "==", currentUser.uid),
             );
 
             const [uidSnapshot, googleUidSnapshot] = await Promise.all([
@@ -226,13 +287,12 @@ function App() {
 
   const handleUpdateCall = async (
     id: string,
-    updates: Partial<Omit<SupportCall, "id">>
+    updates: Partial<Omit<SupportCall, "id">>,
   ) => {
     const callDocRef = doc(db, "supportCalls", id);
     try {
       await updateDoc(callDocRef, updates);
-      clearCollectionCache("supportCalls");
-      refreshCalls();
+      // onSnapshot vai atualizar automaticamente em tempo real
     } catch (error) {
       console.error("Error updating call:", error);
     }
@@ -249,8 +309,7 @@ function App() {
     const callDocRef = doc(db, "supportCalls", id);
     try {
       await deleteDoc(callDocRef);
-      clearCollectionCache("supportCalls");
-      refreshCalls();
+      // onSnapshot vai atualizar automaticamente em tempo real
     } catch (error) {
       console.error("Error permanently deleting call:", error);
     }
@@ -259,15 +318,14 @@ function App() {
   const handleDeleteAllExcluded = async () => {
     const q = query(
       collection(db, "supportCalls"),
-      where("status", "==", "EXCLUIDO")
+      where("status", "==", "EXCLUIDO"),
     );
     const querySnapshot = await getDocs(q);
     const batch = writeBatch(db);
     querySnapshot.forEach((doc) => batch.delete(doc.ref));
     try {
       await batch.commit();
-      clearCollectionCache("supportCalls");
-      refreshCalls();
+      // onSnapshot vai atualizar automaticamente em tempo real
     } catch (error) {
       console.error("Error clearing excluded calls:", error);
     }
@@ -292,13 +350,15 @@ function App() {
           {callsError && (
             <div className="text-red-600 bg-red-50 p-4 rounded-lg border border-red-200">
               <p className="font-bold">Erro ao carregar chamados:</p>
-              <p>{callsError}</p>
+              {/* CORREÇÃO: Adicionado .message */}
+              <p>{callsError.message}</p>
             </div>
           )}
           {driversError && (
             <div className="text-red-600 bg-red-50 p-4 rounded-lg border border-red-200">
               <p className="font-bold">Erro ao carregar motoristas:</p>
-              <p>{driversError}</p>
+              {/* CORREÇÃO: Adicionado .message */}
+              <p>{driversError.message}</p>
             </div>
           )}
           <button
@@ -335,7 +395,7 @@ function App() {
         if (!currentUser) return <AuthPage />;
 
         const driverProfile = drivers.find(
-          (d) => d.uid === currentUser.uid || d.googleUid === currentUser.uid
+          (d) => d.uid === currentUser.uid || d.googleUid === currentUser.uid,
         );
 
         if (driverProfile) {

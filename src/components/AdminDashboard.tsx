@@ -123,6 +123,7 @@ interface SupportCall extends OriginalSupportCall {
   reason?: string;
   packageCount?: number;
   deliveryRegions?: string[];
+  prestador?: Driver; // Correção: Propriedade adicionada
 }
 
 type ColumnId =
@@ -598,7 +599,7 @@ const CallDetailsModal = ({
                 variant="outline"
                 size="sm"
                 className="text-green-600 border-green-200 hover:bg-green-50"
-                onClick={() => handleContactDriver(call.prestador.phone)}
+                onClick={() => handleContactDriver(call.prestador!.phone)}
               >
                 <Phone size={16} className="mr-2" /> WhatsApp
               </Button>

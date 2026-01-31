@@ -9,6 +9,7 @@ import {
   signInWithPopup,
   signOut,
   sendEmailVerification,
+  sendPasswordResetEmail,
 } from "firebase/auth";
 import { auth, db } from "../firebase";
 import {
@@ -36,6 +37,8 @@ import {
   Clock,
   MapPin,
   AlertTriangle,
+  KeyRound,
+  X,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { Loading } from "./ui/loading";
@@ -87,6 +90,13 @@ export const AuthPage = () => {
   >("complete");
   const [isInitialLoading] = useState(false);
 
+  // Estados para recuperação de senha
+  const [showRecoverModal, setShowRecoverModal] = useState(false);
+  const [recoverEmail, setRecoverEmail] = useState("");
+  const [recoverLoading, setRecoverLoading] = useState(false);
+  const [recoverError, setRecoverError] = useState("");
+  const [recoverSuccess, setRecoverSuccess] = useState(false);
+
   const [adminProfile, setAdminProfile] = useState<{
     name: string;
     city: string;
@@ -100,43 +110,53 @@ export const AuthPage = () => {
     initials: string;
   } | null>(null);
   const [currentDateTime, setCurrentDateTime] = useState<Date>(new Date());
-  
+
   // Atualizar data/hora do Brasil
   useEffect(() => {
     const updateDateTime = () => {
-      const brazilTime = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+      const brazilTime = new Date(
+        new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }),
+      );
       setCurrentDateTime(brazilTime);
     };
-    
+
     updateDateTime();
     const interval = setInterval(updateDateTime, 1000);
-    
+
     return () => clearInterval(interval);
   }, []);
-  
+
   // Loading inicial removido - card aparece imediatamente
-  
+
   // Buscar dados do admin quando a aba admin estiver selecionada
   useEffect(() => {
     if (activeTab === "admin") {
       const currentUser = auth.currentUser;
-      
+
       if (currentUser && currentUser.email?.endsWith("@shopee.com")) {
         const fetchAdminProfile = async () => {
           try {
-            const adminDocRef = doc(db, "admins_pre_aprovados", currentUser.uid);
+            const adminDocRef = doc(
+              db,
+              "admins_pre_aprovados",
+              currentUser.uid,
+            );
             const adminDoc = await getDoc(adminDocRef);
-            
+
             if (adminDoc.exists()) {
               const data = adminDoc.data();
-              const name = data.name || currentUser.displayName || currentUser.email?.split("@")[0] || "Admin";
+              const name =
+                data.name ||
+                currentUser.displayName ||
+                currentUser.email?.split("@")[0] ||
+                "Admin";
               const initials = name
                 .split(" ")
                 .map((n: string) => n[0])
                 .join("")
                 .toUpperCase()
                 .slice(0, 2);
-              
+
               setAdminProfile({
                 name: name,
                 city: data.city || "Não informado",
@@ -144,14 +164,17 @@ export const AuthPage = () => {
                 initials: initials,
               });
             } else {
-              const name = currentUser.displayName || currentUser.email?.split("@")[0] || "Admin";
+              const name =
+                currentUser.displayName ||
+                currentUser.email?.split("@")[0] ||
+                "Admin";
               const initials = name
                 .split(" ")
                 .map((n: string) => n[0])
                 .join("")
                 .toUpperCase()
                 .slice(0, 2);
-              
+
               setAdminProfile({
                 name: name,
                 city: "Não informado",
@@ -169,7 +192,7 @@ export const AuthPage = () => {
             });
           }
         };
-        
+
         fetchAdminProfile();
       } else {
         setAdminProfile({
@@ -183,35 +206,37 @@ export const AuthPage = () => {
       setAdminProfile(null);
     }
   }, [activeTab]);
-  
+
   // Buscar dados do motorista quando a aba driver estiver selecionada
   useEffect(() => {
     if (activeTab === "driver") {
       const currentUser = auth.currentUser;
-      
+
       if (currentUser && !currentUser.email?.endsWith("@shopee.com")) {
         const fetchDriverProfile = async () => {
           try {
             const driversRef = collection(db, "motoristas_pre_aprovados");
-            const q = query(
-              driversRef,
-              where("uid", "==", currentUser.uid)
-            );
+            const q = query(driversRef, where("uid", "==", currentUser.uid));
             const querySnapshot = await getDocs(q);
-            
+
             if (!querySnapshot.empty) {
               const driverData = querySnapshot.docs[0].data();
-              const name = driverData.name || currentUser.displayName || currentUser.email?.split("@")[0] || "Motorista";
+              const name =
+                driverData.name ||
+                currentUser.displayName ||
+                currentUser.email?.split("@")[0] ||
+                "Motorista";
               const initials = name
                 .split(" ")
                 .map((n: string) => n[0])
                 .join("")
                 .toUpperCase()
                 .slice(0, 2);
-              
+
               const hub = driverData.hub || "";
-              const city = hub.split("_")[2] || driverData.city || "Não informado";
-              
+              const city =
+                hub.split("_")[2] || driverData.city || "Não informado";
+
               setDriverProfile({
                 name: name,
                 city: city,
@@ -221,23 +246,28 @@ export const AuthPage = () => {
             } else {
               const q2 = query(
                 driversRef,
-                where("googleUid", "==", currentUser.uid)
+                where("googleUid", "==", currentUser.uid),
               );
               const querySnapshot2 = await getDocs(q2);
-              
+
               if (!querySnapshot2.empty) {
                 const driverData = querySnapshot2.docs[0].data();
-                const name = driverData.name || currentUser.displayName || currentUser.email?.split("@")[0] || "Motorista";
+                const name =
+                  driverData.name ||
+                  currentUser.displayName ||
+                  currentUser.email?.split("@")[0] ||
+                  "Motorista";
                 const initials = name
                   .split(" ")
                   .map((n: string) => n[0])
                   .join("")
                   .toUpperCase()
                   .slice(0, 2);
-                
+
                 const hub = driverData.hub || "";
-                const city = hub.split("_")[2] || driverData.city || "Não informado";
-                
+                const city =
+                  hub.split("_")[2] || driverData.city || "Não informado";
+
                 setDriverProfile({
                   name: name,
                   city: city,
@@ -245,14 +275,17 @@ export const AuthPage = () => {
                   initials: initials,
                 });
               } else {
-                const name = currentUser.displayName || currentUser.email?.split("@")[0] || "Motorista";
+                const name =
+                  currentUser.displayName ||
+                  currentUser.email?.split("@")[0] ||
+                  "Motorista";
                 const initials = name
                   .split(" ")
                   .map((n: string) => n[0])
                   .join("")
                   .toUpperCase()
                   .slice(0, 2);
-                
+
                 setDriverProfile({
                   name: name,
                   city: "Não informado",
@@ -271,7 +304,7 @@ export const AuthPage = () => {
             });
           }
         };
-        
+
         fetchDriverProfile();
       } else {
         setDriverProfile({
@@ -322,7 +355,7 @@ export const AuthPage = () => {
       const userCredential = await signInWithEmailAndPassword(
         auth,
         email,
-        password
+        password,
       );
       if (activeTab === "admin" && !userCredential.user.emailVerified) {
         setError("Verifique seu e-mail.");
@@ -350,6 +383,48 @@ export const AuthPage = () => {
     }
   };
 
+  // Função de recuperação de senha
+  const handlePasswordRecovery = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRecoverLoading(true);
+    setRecoverError("");
+    setRecoverSuccess(false);
+
+    if (!recoverEmail) {
+      setRecoverError("Por favor, insira seu e-mail.");
+      setRecoverLoading(false);
+      return;
+    }
+
+    try {
+      await sendPasswordResetEmail(auth, recoverEmail);
+      setRecoverSuccess(true);
+      setRecoverError("");
+      setTimeout(() => {
+        setShowRecoverModal(false);
+        setRecoverEmail("");
+        setRecoverSuccess(false);
+      }, 3000);
+    } catch (err: any) {
+      switch (err.code) {
+        case "auth/user-not-found":
+          setRecoverError("E-mail não encontrado no sistema.");
+          break;
+        case "auth/invalid-email":
+          setRecoverError("E-mail inválido.");
+          break;
+        case "auth/too-many-requests":
+          setRecoverError("Muitas tentativas. Tente novamente mais tarde.");
+          break;
+        default:
+          setRecoverError("Erro ao enviar e-mail de recuperação.");
+          console.error(err);
+      }
+    } finally {
+      setRecoverLoading(false);
+    }
+  };
+
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -369,7 +444,7 @@ export const AuthPage = () => {
       const userCredential = await createUserWithEmailAndPassword(
         auth,
         email,
-        password
+        password,
       );
       const user = userCredential.user;
       if (activeTab === "driver") {
@@ -443,7 +518,7 @@ export const AuthPage = () => {
         }
         const q = query(
           collection(db, "motoristas_pre_aprovados"),
-          where("googleUid", "==", user.uid)
+          where("googleUid", "==", user.uid),
         );
         const querySnapshot = await getDocs(q);
         if (querySnapshot.empty) {
@@ -513,11 +588,12 @@ export const AuthPage = () => {
         <div
           className="absolute inset-0 w-full h-full"
           style={{
-            background: "linear-gradient(135deg, #fff5f0 0%, #ffe8d6 5%, #ffd4b8 10%, #ffb88c 15%, #ffa366 20%, #ff8c42 25%, #ff7733 30%, #ff6622 35%, #ff5511 40%, #ff4400 45%, #ee3d00 50%, #dd3300 55%, #cc2a00 60%, #bb2200 65%, #aa1a00 70%, #991100 75%, #880900 80%, #770600 85%, #660400 90%, #550300 95%, #440200 100%)",
+            background:
+              "linear-gradient(135deg, #fff5f0 0%, #ffe8d6 5%, #ffd4b8 10%, #ffb88c 15%, #ffa366 20%, #ff8c42 25%, #ff7733 30%, #ff6622 35%, #ff5511 40%, #ff4400 45%, #ee3d00 50%, #dd3300 55%, #cc2a00 60%, #bb2200 65%, #aa1a00 70%, #991100 75%, #880900 80%, #770600 85%, #660400 90%, #550300 95%, #440200 100%)",
             backgroundAttachment: "fixed",
           }}
         />
-        
+
         {/* Overlay com padrão sutil */}
         <div className="absolute inset-0 bg-[url('/pattern.svg')] opacity-5" />
         <div className="absolute inset-0 bg-gradient-to-b from-black/5 via-transparent to-black/10" />
@@ -532,9 +608,11 @@ export const AuthPage = () => {
           <div
             className="w-full rounded-3xl p-8 md:p-10 backdrop-blur-xl border-2 shadow-2xl"
             style={{
-              background: "linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(255, 248, 240, 0.98) 100%)",
+              background:
+                "linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(255, 248, 240, 0.98) 100%)",
               borderColor: "rgba(238, 77, 45, 0.3)",
-              boxShadow: "0 25px 60px -20px rgba(238, 77, 45, 0.4), 0 0 40px rgba(255, 122, 26, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.5)",
+              boxShadow:
+                "0 25px 60px -20px rgba(238, 77, 45, 0.4), 0 0 40px rgba(255, 122, 26, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.5)",
             }}
           >
             {/* Logo/Ícone Shopee */}
@@ -542,7 +620,8 @@ export const AuthPage = () => {
               <div
                 className="w-20 h-20 rounded-2xl flex items-center justify-center shadow-lg"
                 style={{
-                  background: "linear-gradient(135deg, #EE4D2D 0%, #FF6B35 100%)",
+                  background:
+                    "linear-gradient(135deg, #EE4D2D 0%, #FF6B35 100%)",
                   boxShadow: "0 10px 30px rgba(238, 77, 45, 0.4)",
                 }}
               >
@@ -557,7 +636,8 @@ export const AuthPage = () => {
               transition={{ delay: 0.2 }}
               className="text-3xl md:text-4xl font-bold text-center mb-2"
               style={{
-                background: "linear-gradient(135deg, #EE4D2D 0%, #FF6B35 50%, #EE4D2D 100%)",
+                background:
+                  "linear-gradient(135deg, #EE4D2D 0%, #FF6B35 50%, #EE4D2D 100%)",
                 WebkitBackgroundClip: "text",
                 WebkitTextFillColor: "transparent",
                 backgroundClip: "text",
@@ -565,7 +645,7 @@ export const AuthPage = () => {
             >
               Validação de Acesso
             </motion.h2>
-            
+
             <motion.p
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -598,10 +678,12 @@ export const AuthPage = () => {
                     className="w-full p-4 rounded-xl text-base font-medium border-2 transition-all focus:ring-4 focus:ring-orange-500/30 outline-none"
                     style={{
                       background: "rgba(255, 255, 255, 0.9)",
-                      borderColor: linkingError ? "#ef4444" : "rgba(238, 77, 45, 0.3)",
+                      borderColor: linkingError
+                        ? "#ef4444"
+                        : "rgba(238, 77, 45, 0.3)",
                       color: "#1e293b",
-                      boxShadow: linkingError 
-                        ? "0 0 0 3px rgba(239, 68, 68, 0.1)" 
+                      boxShadow: linkingError
+                        ? "0 0 0 3px rgba(239, 68, 68, 0.1)"
                         : "0 4px 15px rgba(238, 77, 45, 0.1)",
                     }}
                     placeholder="Digite seu ID único"
@@ -637,19 +719,23 @@ export const AuthPage = () => {
                 disabled={loading || !driverId.trim()}
                 className="w-full py-4 rounded-xl font-bold text-lg text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed hover:scale-[1.02] active:scale-[0.98] shadow-xl"
                 style={{
-                  background: loading || !driverId.trim()
-                    ? "linear-gradient(135deg, #cbd5e1 0%, #94a3b8 100%)"
-                    : "linear-gradient(135deg, #EE4D2D 0%, #FF6B35 50%, #EE4D2D 100%)",
+                  background:
+                    loading || !driverId.trim()
+                      ? "linear-gradient(135deg, #cbd5e1 0%, #94a3b8 100%)"
+                      : "linear-gradient(135deg, #EE4D2D 0%, #FF6B35 50%, #EE4D2D 100%)",
                   backgroundSize: "200% 200%",
-                  boxShadow: loading || !driverId.trim()
-                    ? "0 4px 15px rgba(0, 0, 0, 0.1)"
-                    : "0 10px 30px rgba(238, 77, 45, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.2)",
+                  boxShadow:
+                    loading || !driverId.trim()
+                      ? "0 4px 15px rgba(0, 0, 0, 0.1)"
+                      : "0 10px 30px rgba(238, 77, 45, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.2)",
                 }}
               >
                 {loading ? (
                   <div className="flex items-center justify-center gap-3">
                     <Loading size="sm" variant="spinner" />
-                    <span className="font-semibold tracking-wide">Verificando...</span>
+                    <span className="font-semibold tracking-wide">
+                      Verificando...
+                    </span>
                   </div>
                 ) : (
                   <div className="flex items-center justify-center gap-2">
@@ -688,12 +774,20 @@ export const AuthPage = () => {
               className="mt-8 pt-6 border-t border-orange-200/50"
             >
               <div className="flex items-start gap-3 text-xs text-slate-500">
-                <div className="p-2 rounded-lg bg-orange-50" style={{ color: "#EE4D2D" }}>
+                <div
+                  className="p-2 rounded-lg bg-orange-50"
+                  style={{ color: "#EE4D2D" }}
+                >
                   <Briefcase size={16} />
                 </div>
                 <div>
-                  <p className="font-semibold text-slate-700 mb-1">Não tem seu ID?</p>
-                  <p>Entre em contato com o administrador do sistema para obter seu ID de motorista.</p>
+                  <p className="font-semibold text-slate-700 mb-1">
+                    Não tem seu ID?
+                  </p>
+                  <p>
+                    Entre em contato com o administrador do sistema para obter
+                    seu ID de motorista.
+                  </p>
                 </div>
               </div>
             </motion.div>
@@ -704,7 +798,8 @@ export const AuthPage = () => {
   }
 
   const showRocket = animationPhase === "rocket";
-  const isExpanded = animationPhase === "fadeIn" || animationPhase === "complete";
+  const isExpanded =
+    animationPhase === "fadeIn" || animationPhase === "complete";
 
   // Mostrar loading inicial
   if (isInitialLoading) {
@@ -723,10 +818,10 @@ export const AuthPage = () => {
         >
           <source src="/pinterest-video (1).mp4" type="video/mp4" />
         </video>
-        
+
         {/* Overlay escuro */}
         <div className="absolute inset-0 bg-black/60 z-10" />
-        
+
         {/* Conteúdo do loading */}
         <div className="relative z-20 flex flex-col items-center justify-center gap-8">
           {/* Texto "Loading" com efeito */}
@@ -739,7 +834,8 @@ export const AuthPage = () => {
             <motion.h1
               className="text-6xl md:text-8xl font-bold text-white mb-4"
               style={{
-                textShadow: "0 0 30px rgba(255, 107, 53, 0.8), 0 0 60px rgba(255, 107, 53, 0.5)",
+                textShadow:
+                  "0 0 30px rgba(255, 107, 53, 0.8), 0 0 60px rgba(255, 107, 53, 0.5)",
               }}
               animate={{
                 textShadow: [
@@ -756,7 +852,7 @@ export const AuthPage = () => {
             >
               LOADING
             </motion.h1>
-            
+
             {/* Pontos animados */}
             <div className="flex gap-2 justify-center">
               {[0, 1, 2].map((i) => (
@@ -783,7 +879,8 @@ export const AuthPage = () => {
   }
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center p-4 text-foreground overflow-hidden relative"
+    <div
+      className="min-h-screen w-full flex items-center justify-center p-4 text-foreground overflow-hidden relative"
       style={{
         minHeight: "100vh",
       }}
@@ -793,29 +890,30 @@ export const AuthPage = () => {
         className="absolute inset-0 w-full h-full z-0"
         style={{
           backgroundImage: 'url("/city-skyline-background.jpg")',
-        backgroundSize: "cover",
-        backgroundPosition: "center center",
-        backgroundRepeat: "no-repeat",
-        backgroundAttachment: "fixed",
-        minHeight: "100vh",
+          backgroundSize: "cover",
+          backgroundPosition: "center center",
+          backgroundRepeat: "no-repeat",
+          backgroundAttachment: "fixed",
+          minHeight: "100vh",
           filter: "blur(2px)",
           transform: "scale(1.02)",
-      }}
+        }}
       />
-      
+
       {/* Overlay escuro melhorado para legibilidade */}
       <div className="absolute inset-0 bg-black/25 z-[1]" />
-      
+
       {/* Efeito de glow de fundo durante a animação */}
       <motion.div
         className="absolute inset-0 pointer-events-none"
         initial={{ opacity: 0 }}
-        animate={{ 
-          opacity: showRocket ? 1 : 0 
+        animate={{
+          opacity: showRocket ? 1 : 0,
         }}
         transition={{ duration: 0.3 }}
         style={{
-          background: "radial-gradient(circle at center, rgba(249, 115, 22, 0.3) 0%, transparent 50%)",
+          background:
+            "radial-gradient(circle at center, rgba(249, 115, 22, 0.3) 0%, transparent 50%)",
         }}
       />
 
@@ -823,7 +921,7 @@ export const AuthPage = () => {
       <motion.div
         className={cn(
           "relative z-10 flex items-center justify-center border border-orange-900/30 overflow-hidden transition-all duration-300",
-          isExpanded && "shadow-2xl"
+          isExpanded && "shadow-2xl",
         )}
         initial={{
           opacity: 1,
@@ -841,7 +939,8 @@ export const AuthPage = () => {
           scale: { duration: 0, delay: 0 },
         }}
         style={{
-          background: "linear-gradient(to bottom, #5C1F0F 0%, #6B2515 20%, #7A2B1B 40%, #8B2E1A 60%, #A63E1F 80%, #C04E24 100%)",
+          background:
+            "linear-gradient(to bottom, #5C1F0F 0%, #6B2515 20%, #7A2B1B 40%, #8B2E1A 60%, #A63E1F 80%, #C04E24 100%)",
           position: "relative",
           width: "min(95vw, 1400px)",
           borderRadius: "2.5rem",
@@ -849,7 +948,7 @@ export const AuthPage = () => {
         }}
       >
         {/* Efeito de textura sutil melhorado */}
-        <div 
+        <div
           className="absolute inset-0 pointer-events-none z-0"
           style={{
             background: `
@@ -868,11 +967,11 @@ export const AuthPage = () => {
             <motion.div
               className="absolute inset-0 flex items-center justify-center z-20"
               initial={{ opacity: 1, y: 0 }}
-              exit={{ 
-                opacity: 0, 
+              exit={{
+                opacity: 0,
                 y: -300,
                 scale: 0.8,
-                transition: { duration: 0.2, ease: [0.22, 1, 0.36, 1] } 
+                transition: { duration: 0.2, ease: [0.22, 1, 0.36, 1] },
               }}
             >
               <Lottie
@@ -889,7 +988,7 @@ export const AuthPage = () => {
         <motion.div
           className="flex flex-col md:flex-row w-full"
           initial={{ opacity: 1 }}
-          animate={{ 
+          animate={{
             opacity: 1,
           }}
           transition={{ duration: 0, delay: 0, ease: [0.22, 1, 0.36, 1] }}
@@ -897,163 +996,196 @@ export const AuthPage = () => {
           <div className="flex-1 relative p-8 md:p-12 lg:p-16">
             {/* Conteúdo do formulário */}
             <div className="w-full z-10">
-                <div className="flex flex-col">
-                  {/* Seção superior do Motorista - aparece apenas na aba driver */}
-                  {activeTab === "driver" && (
-                    <motion.div
-                      initial={{ opacity: 0, y: -20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.15 }}
-                      className="w-full p-4 md:p-6 rounded-t-[2.5rem] border-b border-orange-900/30 relative z-10 mb-6"
-                      style={{
-                        marginTop: "-2rem",
-                        marginLeft: "-2rem",
-                        marginRight: "-2rem",
-                        backgroundColor: "#000000",
-                        background: "linear-gradient(to bottom, #000000 0%, #1a1a1a 100%)",
-                      }}
-                    >
-                      {/* Data e hora do Brasil no topo */}
-                      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-4 pb-4 border-b border-orange-900/20">
-                        <div className="flex flex-col gap-1">
-                          <div className="flex items-center gap-2 text-white">
-                            <Clock size={20} className="text-orange-500" />
-                            <span className="text-xl md:text-2xl font-bold">
-                              {format(currentDateTime, "HH:mm:ss", { locale: ptBR })}
-                            </span>
-                          </div>
-                          <div className="text-sm md:text-base text-gray-300 ml-8">
-                            {format(currentDateTime, "EEEE, dd 'de' MMMM 'de' yyyy", { locale: ptBR })}
-                          </div>
+              <div className="flex flex-col">
+                {/* Seção superior do Motorista - aparece apenas na aba driver */}
+                {activeTab === "driver" && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.15 }}
+                    className="w-full p-4 md:p-6 rounded-t-[2.5rem] border-b border-orange-900/30 relative z-10 mb-6"
+                    style={{
+                      marginTop: "-2rem",
+                      marginLeft: "-2rem",
+                      marginRight: "-2rem",
+                      backgroundColor: "#000000",
+                      background:
+                        "linear-gradient(to bottom, #000000 0%, #1a1a1a 100%)",
+                    }}
+                  >
+                    {/* Data e hora do Brasil no topo */}
+                    <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-4 pb-4 border-b border-orange-900/20">
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-2 text-white">
+                          <Clock size={20} className="text-orange-500" />
+                          <span className="text-xl md:text-2xl font-bold">
+                            {format(currentDateTime, "HH:mm:ss", {
+                              locale: ptBR,
+                            })}
+                          </span>
+                        </div>
+                        <div className="text-sm md:text-base text-gray-300 ml-8">
+                          {format(
+                            currentDateTime,
+                            "EEEE, dd 'de' MMMM 'de' yyyy",
+                            { locale: ptBR },
+                          )}
                         </div>
                       </div>
-                      
-                      {/* Informações do perfil */}
-                      <div className="flex items-center gap-4">
-                        {/* Foto de perfil */}
-                        <div className="relative flex-shrink-0">
-                          {driverProfile?.avatar ? (
-                            <img
-                              src={driverProfile.avatar}
-                              alt={driverProfile.name}
-                              className="w-16 h-16 md:w-20 md:h-20 rounded-full object-cover border-2 border-orange-500/50 shadow-lg"
-                              onError={(e) => {
-                                const target = e.target as HTMLImageElement;
-                                target.style.display = "none";
-                                const parent = target.parentElement;
-                                if (parent) {
-                                  const fallback = parent.querySelector(".driver-avatar-fallback") as HTMLElement;
-                                  if (fallback) fallback.style.display = "flex";
-                                }
-                              }}
-                            />
-                          ) : null}
-                          <div 
-                            className={`driver-avatar-fallback w-16 h-16 md:w-20 md:h-20 rounded-full bg-gradient-to-br from-orange-500 to-orange-700 flex items-center justify-center border-2 border-orange-500/50 shadow-lg ${driverProfile?.avatar ? "hidden" : ""}`}
-                            style={{ display: driverProfile?.avatar ? "none" : "flex" }}
-                          >
-                            <span className="text-2xl md:text-3xl font-bold text-white">
-                              {driverProfile?.initials || "M"}
-                            </span>
-                          </div>
-                        </div>
-                        
-                        {/* Nome e cidade */}
-                        <div className="flex flex-col flex-1 min-w-0">
-                          <h3 className="text-lg md:text-xl font-bold text-white mb-1 truncate">
-                            {driverProfile?.name || "Motorista"}
-                          </h3>
-                          <div className="flex items-center gap-1.5 text-sm md:text-base text-gray-300">
-                            <MapPin size={16} className="text-orange-500 flex-shrink-0" />
-                            <span className="truncate">{driverProfile?.city || "Não informado"}</span>
-                          </div>
+                    </div>
+
+                    {/* Informações do perfil */}
+                    <div className="flex items-center gap-4">
+                      {/* Foto de perfil */}
+                      <div className="relative flex-shrink-0">
+                        {driverProfile?.avatar ? (
+                          <img
+                            src={driverProfile.avatar}
+                            alt={driverProfile.name}
+                            className="w-16 h-16 md:w-20 md:h-20 rounded-full object-cover border-2 border-orange-500/50 shadow-lg"
+                            onError={(e) => {
+                              const target = e.target as HTMLImageElement;
+                              target.style.display = "none";
+                              const parent = target.parentElement;
+                              if (parent) {
+                                const fallback = parent.querySelector(
+                                  ".driver-avatar-fallback",
+                                ) as HTMLElement;
+                                if (fallback) fallback.style.display = "flex";
+                              }
+                            }}
+                          />
+                        ) : null}
+                        <div
+                          className={`driver-avatar-fallback w-16 h-16 md:w-20 md:h-20 rounded-full bg-gradient-to-br from-orange-500 to-orange-700 flex items-center justify-center border-2 border-orange-500/50 shadow-lg ${driverProfile?.avatar ? "hidden" : ""}`}
+                          style={{
+                            display: driverProfile?.avatar ? "none" : "flex",
+                          }}
+                        >
+                          <span className="text-2xl md:text-3xl font-bold text-white">
+                            {driverProfile?.initials || "M"}
+                          </span>
                         </div>
                       </div>
-                    </motion.div>
-                  )}
-                  
-                  {/* Seção superior do Admin - aparece apenas na aba admin */}
-                  {activeTab === "admin" && (
-                    <motion.div
-                      initial={{ opacity: 0, y: -20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.15 }}
-                      className="w-full p-4 md:p-6 rounded-t-[2.5rem] border-b border-orange-900/30 relative z-10 mb-6"
-                      style={{
-                        marginTop: "-2rem",
-                        marginLeft: "-2rem",
-                        marginRight: "-2rem",
-                        backgroundColor: "#000000",
-                        background: "linear-gradient(to bottom, #000000 0%, #1a1a1a 100%)",
-                      }}
-                    >
-                      {/* Data e hora do Brasil no topo */}
-                      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-4 pb-4 border-b border-orange-900/20">
-                        <div className="flex flex-col gap-1">
-                          <div className="flex items-center gap-2 text-white">
-                            <Clock size={20} className="text-orange-500" />
-                            <span className="text-xl md:text-2xl font-bold">
-                              {format(currentDateTime, "HH:mm:ss", { locale: ptBR })}
-                            </span>
-                          </div>
-                          <div className="text-sm md:text-base text-gray-300 ml-8">
-                            {format(currentDateTime, "EEEE, dd 'de' MMMM 'de' yyyy", { locale: ptBR })}
-                          </div>
+
+                      {/* Nome e cidade */}
+                      <div className="flex flex-col flex-1 min-w-0">
+                        <h3 className="text-lg md:text-xl font-bold text-white mb-1 truncate">
+                          {driverProfile?.name || "Motorista"}
+                        </h3>
+                        <div className="flex items-center gap-1.5 text-sm md:text-base text-gray-300">
+                          <MapPin
+                            size={16}
+                            className="text-orange-500 flex-shrink-0"
+                          />
+                          <span className="truncate">
+                            {driverProfile?.city || "Não informado"}
+                          </span>
                         </div>
                       </div>
-                      
-                      {/* Informações do perfil */}
-                      <div className="flex items-center gap-4">
-                        {/* Foto de perfil */}
-                        <div className="relative flex-shrink-0">
-                          {adminProfile?.avatar ? (
-                            <img
-                              src={adminProfile.avatar}
-                              alt={adminProfile.name}
-                              className="w-16 h-16 md:w-20 md:h-20 rounded-full object-cover border-2 border-orange-500/50 shadow-lg"
-                              onError={(e) => {
-                                const target = e.target as HTMLImageElement;
-                                target.style.display = "none";
-                                const parent = target.parentElement;
-                                if (parent) {
-                                  const fallback = parent.querySelector(".admin-avatar-fallback") as HTMLElement;
-                                  if (fallback) fallback.style.display = "flex";
-                                }
-                              }}
-                            />
-                          ) : null}
-                          <div 
-                            className={`admin-avatar-fallback w-16 h-16 md:w-20 md:h-20 rounded-full bg-gradient-to-br from-orange-500 to-orange-700 flex items-center justify-center border-2 border-orange-500/50 shadow-lg ${adminProfile?.avatar ? "hidden" : ""}`}
-                            style={{ display: adminProfile?.avatar ? "none" : "flex" }}
-                          >
-                            <span className="text-2xl md:text-3xl font-bold text-white">
-                              {adminProfile?.initials || "A"}
-                            </span>
-                          </div>
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* Seção superior do Admin - aparece apenas na aba admin */}
+                {activeTab === "admin" && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.15 }}
+                    className="w-full p-4 md:p-6 rounded-t-[2.5rem] border-b border-orange-900/30 relative z-10 mb-6"
+                    style={{
+                      marginTop: "-2rem",
+                      marginLeft: "-2rem",
+                      marginRight: "-2rem",
+                      backgroundColor: "#000000",
+                      background:
+                        "linear-gradient(to bottom, #000000 0%, #1a1a1a 100%)",
+                    }}
+                  >
+                    {/* Data e hora do Brasil no topo */}
+                    <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-4 pb-4 border-b border-orange-900/20">
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-2 text-white">
+                          <Clock size={20} className="text-orange-500" />
+                          <span className="text-xl md:text-2xl font-bold">
+                            {format(currentDateTime, "HH:mm:ss", {
+                              locale: ptBR,
+                            })}
+                          </span>
                         </div>
-                        
-                        {/* Nome e cidade */}
-                        <div className="flex flex-col flex-1 min-w-0">
-                          <h3 className="text-lg md:text-xl font-bold text-white mb-1 truncate">
-                            {adminProfile?.name || "Admin Shopee"}
-                          </h3>
-                          <div className="flex items-center gap-1.5 text-sm md:text-base text-gray-300">
-                            <MapPin size={16} className="text-orange-500 flex-shrink-0" />
-                            <span className="truncate">{adminProfile?.city || "Não informado"}</span>
-                          </div>
+                        <div className="text-sm md:text-base text-gray-300 ml-8">
+                          {format(
+                            currentDateTime,
+                            "EEEE, dd 'de' MMMM 'de' yyyy",
+                            { locale: ptBR },
+                          )}
                         </div>
                       </div>
-                    </motion.div>
-                  )}
-                  
+                    </div>
+
+                    {/* Informações do perfil */}
+                    <div className="flex items-center gap-4">
+                      {/* Foto de perfil */}
+                      <div className="relative flex-shrink-0">
+                        {adminProfile?.avatar ? (
+                          <img
+                            src={adminProfile.avatar}
+                            alt={adminProfile.name}
+                            className="w-16 h-16 md:w-20 md:h-20 rounded-full object-cover border-2 border-orange-500/50 shadow-lg"
+                            onError={(e) => {
+                              const target = e.target as HTMLImageElement;
+                              target.style.display = "none";
+                              const parent = target.parentElement;
+                              if (parent) {
+                                const fallback = parent.querySelector(
+                                  ".admin-avatar-fallback",
+                                ) as HTMLElement;
+                                if (fallback) fallback.style.display = "flex";
+                              }
+                            }}
+                          />
+                        ) : null}
+                        <div
+                          className={`admin-avatar-fallback w-16 h-16 md:w-20 md:h-20 rounded-full bg-gradient-to-br from-orange-500 to-orange-700 flex items-center justify-center border-2 border-orange-500/50 shadow-lg ${adminProfile?.avatar ? "hidden" : ""}`}
+                          style={{
+                            display: adminProfile?.avatar ? "none" : "flex",
+                          }}
+                        >
+                          <span className="text-2xl md:text-3xl font-bold text-white">
+                            {adminProfile?.initials || "A"}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Nome e cidade */}
+                      <div className="flex flex-col flex-1 min-w-0">
+                        <h3 className="text-lg md:text-xl font-bold text-white mb-1 truncate">
+                          {adminProfile?.name || "Admin Shopee"}
+                        </h3>
+                        <div className="flex items-center gap-1.5 text-sm md:text-base text-gray-300">
+                          <MapPin
+                            size={16}
+                            className="text-orange-500 flex-shrink-0"
+                          />
+                          <span className="truncate">
+                            {adminProfile?.city || "Não informado"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+
                 <div className="flex flex-col border-b border-border">
                   <div className="mb-6">
                     {/* Logo Shopee Xpress em texto - largura total e maior */}
                     <div className="flex items-baseline justify-center w-full">
-                      <span 
+                      <span
                         className="text-5xl md:text-6xl lg:text-7xl font-bold italic"
                         style={{
-                          background: "linear-gradient(135deg, #f97316 0%, #ea580c 50%, #f97316 100%)",
+                          background:
+                            "linear-gradient(135deg, #f97316 0%, #ea580c 50%, #f97316 100%)",
                           WebkitBackgroundClip: "text",
                           WebkitTextFillColor: "transparent",
                           textShadow: "0 0 40px rgba(249, 115, 22, 0.3)",
@@ -1061,10 +1193,11 @@ export const AuthPage = () => {
                       >
                         Shopee
                       </span>
-                      <span 
+                      <span
                         className="text-5xl md:text-6xl lg:text-7xl font-black tracking-tight"
                         style={{
-                          background: "linear-gradient(135deg, #fb923c 0%, #f97316 50%, #ea580c 100%)",
+                          background:
+                            "linear-gradient(135deg, #fb923c 0%, #f97316 50%, #ea580c 100%)",
                           WebkitBackgroundClip: "text",
                           WebkitTextFillColor: "transparent",
                           textShadow: "0 0 40px rgba(249, 115, 22, 0.3)",
@@ -1072,10 +1205,11 @@ export const AuthPage = () => {
                       >
                         X
                       </span>
-                      <span 
+                      <span
                         className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-wider"
                         style={{
-                          background: "linear-gradient(135deg, #f97316 0%, #ea580c 100%)",
+                          background:
+                            "linear-gradient(135deg, #f97316 0%, #ea580c 100%)",
                           WebkitBackgroundClip: "text",
                           WebkitTextFillColor: "transparent",
                         }}
@@ -1084,380 +1218,425 @@ export const AuthPage = () => {
                       </span>
                     </div>
                   </div>
-                  </div>
-                  <div className="flex rounded-full border border-border overflow-hidden text-sm font-semibold" style={{ background: "rgba(15, 23, 42, 0.1)" }}>
-                    <button
-                      onClick={() => {
-                        setPreviousTab(activeTab);
-                        setActiveTab("driver");
-                      }}
-                      className={cn(
-                        "flex-1 py-4 md:py-5 text-lg md:text-xl font-semibold text-center transition-all duration-300",
-                        activeTab === "driver"
-                          ? "bg-primary text-primary-foreground shadow-lg"
-                          : "text-slate-800/70 hover:bg-slate-800/10 hover:text-slate-900"
-                      )}
-                    >
-                      <User className="inline-block mr-2 md:mr-3" size={20} />{" "}
-                      Motorista
-                    </button>
-                    <button
-                      onClick={() => {
-                        setPreviousTab(activeTab);
-                        setActiveTab("admin");
-                      }}
-                      className={cn(
-                        "flex-1 py-4 md:py-5 text-lg md:text-xl font-semibold text-center transition-all duration-300",
-                        activeTab === "admin"
-                          ? "bg-primary text-primary-foreground shadow-lg"
-                          : "text-slate-800/70 hover:bg-slate-800/10 hover:text-slate-900"
-                      )}
-                    >
-                      <Briefcase
-                        className="inline-block mr-2 md:mr-3"
-                        size={20}
-                      />{" "}
-                      Admin
-                    </button>
-                  </div>
                 </div>
-
-                <div className="pt-8 md:pt-12 space-y-8 md:space-y-10">
-                  <div className="relative h-32 md:h-40 lg:h-48 overflow-hidden flex items-center justify-center">
-                    <AnimatePresence mode="wait">
-                      <motion.h2
-                        key={`${activeTab}-${isLoginView}`}
-                        initial={{
-                          x: activeTab === "driver" ? -300 : 300,
-                          opacity: 0,
-                        }}
-                        animate={{ x: 0, opacity: 1 }}
-                        exit={{
-                          x: previousTab === "driver" ? 300 : -300,
-                          opacity: 0,
-                        }}
-                        transition={{
-                          type: "spring",
-                          stiffness: 400,
-                          damping: 25,
-                          duration: 0.3,
-                        }}
-                        className="absolute inset-0 flex items-center justify-center text-center text-3xl md:text-5xl lg:text-6xl font-bold leading-tight px-4"
-                        style={{ color: "#FFFFFF" }}
-                      >
-                        {isLoginView ? "Login de " : "Cadastro de "}
-                        {activeTab === "admin" ? "Administrador" : "Motorista"}
-                      </motion.h2>
-                    </AnimatePresence>
-                  </div>
-
-                  {error && (
-                    <p className="text-base md:text-lg text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-3">
-                      {error}
-                    </p>
-                  )}
-                  {successMessage && (
-                    <p className="text-base md:text-lg text-green-400 bg-green-500/10 border border-green-500/30 rounded-lg px-4 py-3">
-                      {successMessage}
-                    </p>
-                  )}
-
-                  <AnimatePresence mode="wait">
-                    {isLoginView ? (
-                      <motion.form
-                        key={`login-${activeTab}`}
-                        initial={{
-                          x: activeTab === "driver" ? -100 : 100,
-                          opacity: 0,
-                        }}
-                        animate={{ x: 0, opacity: 1 }}
-                        exit={{
-                          x: previousTab === "driver" ? 100 : -100,
-                          opacity: 0,
-                        }}
-                        transition={{
-                          type: "spring",
-                          stiffness: 300,
-                          damping: 30,
-                          duration: 0.4,
-                        }}
-                        onSubmit={handleLogin}
-                        className="space-y-6 md:space-y-8"
-                      >
-                        <div className="relative">
-                          <Mail
-                            className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground"
-                            size={24}
-                          />
-                          <input
-                            type="email"
-                            placeholder="E-mail"
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
-                            className="w-full pl-12 pr-4 py-4 md:py-5 text-lg md:text-xl rounded-2xl bg-background border border-input text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring transition-all"
-                            required
-                            autoComplete="off"
-                          />
-                        </div>
-                        <div className="relative">
-                          <Lock
-                            className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground"
-                            size={24}
-                          />
-                          <input
-                            type={showPassword ? "text" : "password"}
-                            placeholder="Senha"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            className="w-full pl-12 pr-12 py-4 md:py-5 text-lg md:text-xl rounded-2xl bg-background border border-input text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring transition-all"
-                            required
-                            autoComplete="new-password"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setShowPassword(!showPassword)}
-                            className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                          >
-                            {showPassword ? (
-                              <EyeOff size={20} />
-                            ) : (
-                              <Eye size={20} />
-                            )}
-                          </button>
-                        </div>
-                        <button
-                          type="submit"
-                          disabled={loading}
-                          className="w-full flex justify-center items-center gap-3 py-4 md:py-5 px-4 rounded-2xl text-lg md:text-xl font-semibold text-primary-foreground bg-primary hover:bg-primary/90 transition-all shadow-lg disabled:opacity-50"
-                        >
-                          {loading ? (
-                            <>
-                              <Loading size="sm" variant="spinner" />
-                              <span className="font-semibold tracking-wide" style={{ 
-                                fontFamily: "system-ui, -apple-system, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif",
-                                letterSpacing: "0.5px"
-                              }}>Entrando...</span>
-                            </>
-                          ) : (
-                            <>
-                              <LogIn size={20} />
-                              <span>Entrar</span>
-                            </>
-                          )}
-                        </button>
-                      </motion.form>
-                    ) : (
-                      <motion.form
-                        key={`register-${activeTab}`}
-                        initial={{
-                          x: activeTab === "driver" ? -100 : 100,
-                          opacity: 0,
-                        }}
-                        animate={{ x: 0, opacity: 1 }}
-                        exit={{
-                          x: previousTab === "driver" ? 100 : -100,
-                          opacity: 0,
-                        }}
-                        transition={{
-                          type: "spring",
-                          stiffness: 300,
-                          damping: 30,
-                          duration: 0.4,
-                        }}
-                        onSubmit={handleRegister}
-                        className="space-y-6 md:space-y-8"
-                      >
-                        <div className="relative">
-                          <User
-                            className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground"
-                            size={24}
-                          />
-                          <input
-                            type="text"
-                            placeholder="Nome"
-                            value={name}
-                            onChange={(e) => setName(e.target.value)}
-                            className="w-full pl-12 pr-4 py-4 md:py-5 text-lg md:text-xl rounded-2xl bg-background border border-input text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring transition-all"
-                            required
-                            autoComplete="off"
-                          />
-                        </div>
-                        <div className="relative">
-                          <User
-                            className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground"
-                            size={24}
-                          />
-                          <input
-                            type="text"
-                            placeholder="Sobrenome"
-                            value={lastName}
-                            onChange={(e) => setLastName(e.target.value)}
-                            className="w-full pl-12 pr-4 py-4 md:py-5 text-lg md:text-xl rounded-2xl bg-background border border-input text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring transition-all"
-                            required
-                            autoComplete="off"
-                          />
-                        </div>
-                        <div className="relative">
-                          <Calendar
-                            className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground"
-                            size={24}
-                          />
-                          <input
-                            type="date"
-                            placeholder="Data de Nascimento"
-                            value={birthDate}
-                            onChange={(e) => setBirthDate(e.target.value)}
-                            className="w-full pl-12 pr-4 py-4 md:py-5 text-lg md:text-xl rounded-2xl bg-background border border-input text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring transition-all"
-                            required
-                            autoComplete="off"
-                          />
-                        </div>
-                        <div className="relative">
-                          <Phone
-                            className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground"
-                            size={24}
-                          />
-                          <input
-                            type="tel"
-                            placeholder="Telefone (com DDD)"
-                            value={phone}
-                            onChange={(e) =>
-                              setPhone(formatAndLimitPhone(e.target.value))
-                            }
-                            className="w-full pl-12 pr-4 py-4 md:py-5 text-lg md:text-xl rounded-2xl bg-background border border-input text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring transition-all"
-                            required
-                            autoComplete="off"
-                          />
-                        </div>
-                        {activeTab === "driver" && (
-                          <div className="relative">
-                            <Hash
-                              className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground"
-                              size={24}
-                            />
-                            <input
-                              type="text"
-                              placeholder="ID de Motorista (fornecido pelo admin)"
-                              value={driverId}
-                              onChange={(e) => setDriverId(e.target.value)}
-                              className="w-full pl-12 pr-4 py-4 md:py-5 text-lg md:text-xl rounded-2xl bg-background border border-input text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring transition-all"
-                              required
-                              autoComplete="off"
-                            />
-                          </div>
-                        )}
-                        <div className="relative">
-                          <Mail
-                            className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground"
-                            size={24}
-                          />
-                          <input
-                            type="email"
-                            placeholder="E-mail"
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
-                            className="w-full pl-12 pr-4 py-4 md:py-5 text-lg md:text-xl rounded-2xl bg-background border border-input text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring transition-all"
-                            required
-                            autoComplete="off"
-                          />
-                        </div>
-                        <div className="relative">
-                          <Lock
-                            className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground"
-                            size={24}
-                          />
-                          <input
-                            type={showPassword ? "text" : "password"}
-                            placeholder="Senha (mínimo 6 caracteres)"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            className="w-full pl-12 pr-12 py-4 md:py-5 text-lg md:text-xl rounded-2xl bg-background border border-input text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring transition-all"
-                            required
-                            autoComplete="new-password"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setShowPassword(!showPassword)}
-                            className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                          >
-                            {showPassword ? (
-                              <EyeOff size={20} />
-                            ) : (
-                              <Eye size={20} />
-                            )}
-                          </button>
-                        </div>
-                        <button
-                          type="submit"
-                          disabled={loading}
-                          className="w-full flex justify-center items-center gap-3 py-4 md:py-5 px-4 rounded-2xl text-lg md:text-xl font-semibold text-primary-foreground bg-primary hover:bg-primary/90 transition-all shadow-lg disabled:opacity-50"
-                        >
-                          {loading ? (
-                            <>
-                              <Loading size="sm" variant="spinner" />
-                              <span className="font-semibold tracking-wide" style={{ 
-                                fontFamily: "system-ui, -apple-system, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif",
-                                letterSpacing: "0.5px"
-                              }}>Cadastrando...</span>
-                            </>
-                          ) : (
-                            <>
-                              <UserPlus size={20} />
-                              <span>Cadastrar</span>
-                            </>
-                          )}
-                        </button>
-                      </motion.form>
+                <div
+                  className="flex rounded-full border border-border overflow-hidden text-sm font-semibold"
+                  style={{ background: "rgba(15, 23, 42, 0.1)" }}
+                >
+                  <button
+                    onClick={() => {
+                      setPreviousTab(activeTab);
+                      setActiveTab("driver");
+                    }}
+                    className={cn(
+                      "flex-1 py-4 md:py-5 text-lg md:text-xl font-semibold text-center transition-all duration-300",
+                      activeTab === "driver"
+                        ? "bg-primary text-primary-foreground shadow-lg"
+                        : "text-slate-800/70 hover:bg-slate-800/10 hover:text-slate-900",
                     )}
-                  </AnimatePresence>
+                  >
+                    <User className="inline-block mr-2 md:mr-3" size={20} />{" "}
+                    Motorista
+                  </button>
+                  <button
+                    onClick={() => {
+                      setPreviousTab(activeTab);
+                      setActiveTab("admin");
+                    }}
+                    className={cn(
+                      "flex-1 py-4 md:py-5 text-lg md:text-xl font-semibold text-center transition-all duration-300",
+                      activeTab === "admin"
+                        ? "bg-primary text-primary-foreground shadow-lg"
+                        : "text-slate-800/70 hover:bg-slate-800/10 hover:text-slate-900",
+                    )}
+                  >
+                    <Briefcase
+                      className="inline-block mr-2 md:mr-3"
+                      size={20}
+                    />{" "}
+                    Admin
+                  </button>
+                </div>
+              </div>
 
-                  <div className="pt-4 md:pt-6 text-base md:text-lg" style={{ color: "#FFFFFF" }}>
-                    <button
-                      onClick={() => {
-                        setPreviousTab(activeTab);
-                        setIsLoginView(!isLoginView);
-                        setError("");
-                        setSuccessMessage("");
+              <div className="pt-8 md:pt-12 space-y-8 md:space-y-10">
+                <div className="relative h-32 md:h-40 lg:h-48 overflow-hidden flex items-center justify-center">
+                  <AnimatePresence mode="wait">
+                    <motion.h2
+                      key={`${activeTab}-${isLoginView}`}
+                      initial={{
+                        x: activeTab === "driver" ? -300 : 300,
+                        opacity: 0,
                       }}
-                      className="font-medium text-orange-400 hover:text-orange-300 transition-colors"
+                      animate={{ x: 0, opacity: 1 }}
+                      exit={{
+                        x: previousTab === "driver" ? 300 : -300,
+                        opacity: 0,
+                      }}
+                      transition={{
+                        type: "spring",
+                        stiffness: 400,
+                        damping: 25,
+                        duration: 0.3,
+                      }}
+                      className="absolute inset-0 flex items-center justify-center text-center text-3xl md:text-5xl lg:text-6xl font-bold leading-tight px-4"
+                      style={{ color: "#FFFFFF" }}
                     >
-                      {isLoginView
-                        ? "Não tem uma conta? Cadastre-se"
-                        : "Já tem uma conta? Faça login"}
-                    </button>
-                  </div>
+                      {isLoginView ? "Login de " : "Cadastro de "}
+                      {activeTab === "admin" ? "Administrador" : "Motorista"}
+                    </motion.h2>
+                  </AnimatePresence>
+                </div>
 
-                  <div className="mt-8 md:mt-10 relative">
-                    <div className="absolute inset-0 flex items-center">
-                      <div className="w-full border-t" style={{ borderColor: "rgba(255, 255, 255, 0.2)" }} />
-                    </div>
-                    <div className="relative flex justify-center text-base md:text-lg" style={{ color: "#E2E8F0" }}>
-                      <span className="px-4 rounded-full" style={{ background: "rgba(255, 255, 255, 0.1)", backdropFilter: "blur(8px)" }}>Ou</span>
-                    </div>
-                  </div>
+                {error && (
+                  <p className="text-base md:text-lg text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-3">
+                    {error}
+                  </p>
+                )}
+                {successMessage && (
+                  <p className="text-base md:text-lg text-green-400 bg-green-500/10 border border-green-500/30 rounded-lg px-4 py-3">
+                    {successMessage}
+                  </p>
+                )}
 
-                  <div className="mt-8 md:mt-10">
-                    <button
-                      onClick={() => handleGoogleSignIn(activeTab)}
-                      disabled={loading}
-                      className="w-full flex justify-center items-center gap-3 py-4 md:py-5 px-4 rounded-2xl border border-border bg-secondary text-secondary-foreground text-base md:text-lg font-medium hover:bg-secondary/80 disabled:opacity-50 transition-all"
+                <AnimatePresence mode="wait">
+                  {isLoginView ? (
+                    <motion.form
+                      key={`login-${activeTab}`}
+                      initial={{
+                        x: activeTab === "driver" ? -100 : 100,
+                        opacity: 0,
+                      }}
+                      animate={{ x: 0, opacity: 1 }}
+                      exit={{
+                        x: previousTab === "driver" ? 100 : -100,
+                        opacity: 0,
+                      }}
+                      transition={{
+                        type: "spring",
+                        stiffness: 300,
+                        damping: 30,
+                        duration: 0.4,
+                      }}
+                      onSubmit={handleLogin}
+                      className="space-y-6 md:space-y-8"
                     >
-                      <GoogleIcon /> Entrar com o Google
-                    </button>
+                      <div className="relative">
+                        <Mail
+                          className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground"
+                          size={24}
+                        />
+                        <input
+                          type="email"
+                          placeholder="E-mail"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          className="w-full pl-12 pr-4 py-4 md:py-5 text-lg md:text-xl rounded-2xl bg-background border border-input text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring transition-all"
+                          required
+                          autoComplete="off"
+                        />
+                      </div>
+                      <div className="relative">
+                        <Lock
+                          className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground"
+                          size={24}
+                        />
+                        <input
+                          type={showPassword ? "text" : "password"}
+                          placeholder="Senha"
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          className="w-full pl-12 pr-12 py-4 md:py-5 text-lg md:text-xl rounded-2xl bg-background border border-input text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring transition-all"
+                          required
+                          autoComplete="new-password"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          {showPassword ? (
+                            <EyeOff size={20} />
+                          ) : (
+                            <Eye size={20} />
+                          )}
+                        </button>
+                      </div>
+
+                      {/* Botão Esqueci minha senha */}
+                      <div className="flex justify-end -mt-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowRecoverModal(true)}
+                          className="text-sm text-orange-400 hover:text-orange-300 font-medium transition-colors flex items-center gap-1.5"
+                        >
+                          <KeyRound size={16} />
+                          <span>Esqueci minha senha</span>
+                        </button>
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={loading}
+                        className="w-full flex justify-center items-center gap-3 py-4 md:py-5 px-4 rounded-2xl text-lg md:text-xl font-semibold text-primary-foreground bg-primary hover:bg-primary/90 transition-all shadow-lg disabled:opacity-50"
+                      >
+                        {loading ? (
+                          <>
+                            <Loading size="sm" variant="spinner" />
+                            <span
+                              className="font-semibold tracking-wide"
+                              style={{
+                                fontFamily:
+                                  "system-ui, -apple-system, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif",
+                                letterSpacing: "0.5px",
+                              }}
+                            >
+                              Entrando...
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <LogIn size={20} />
+                            <span>Entrar</span>
+                          </>
+                        )}
+                      </button>
+                    </motion.form>
+                  ) : (
+                    <motion.form
+                      key={`register-${activeTab}`}
+                      initial={{
+                        x: activeTab === "driver" ? -100 : 100,
+                        opacity: 0,
+                      }}
+                      animate={{ x: 0, opacity: 1 }}
+                      exit={{
+                        x: previousTab === "driver" ? 100 : -100,
+                        opacity: 0,
+                      }}
+                      transition={{
+                        type: "spring",
+                        stiffness: 300,
+                        damping: 30,
+                        duration: 0.4,
+                      }}
+                      onSubmit={handleRegister}
+                      className="space-y-6 md:space-y-8"
+                    >
+                      <div className="relative">
+                        <User
+                          className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground"
+                          size={24}
+                        />
+                        <input
+                          type="text"
+                          placeholder="Nome"
+                          value={name}
+                          onChange={(e) => setName(e.target.value)}
+                          className="w-full pl-12 pr-4 py-4 md:py-5 text-lg md:text-xl rounded-2xl bg-background border border-input text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring transition-all"
+                          required
+                          autoComplete="off"
+                        />
+                      </div>
+                      <div className="relative">
+                        <User
+                          className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground"
+                          size={24}
+                        />
+                        <input
+                          type="text"
+                          placeholder="Sobrenome"
+                          value={lastName}
+                          onChange={(e) => setLastName(e.target.value)}
+                          className="w-full pl-12 pr-4 py-4 md:py-5 text-lg md:text-xl rounded-2xl bg-background border border-input text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring transition-all"
+                          required
+                          autoComplete="off"
+                        />
+                      </div>
+                      <div className="relative">
+                        <Calendar
+                          className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground"
+                          size={24}
+                        />
+                        <input
+                          type="date"
+                          placeholder="Data de Nascimento"
+                          value={birthDate}
+                          onChange={(e) => setBirthDate(e.target.value)}
+                          className="w-full pl-12 pr-4 py-4 md:py-5 text-lg md:text-xl rounded-2xl bg-background border border-input text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring transition-all"
+                          required
+                          autoComplete="off"
+                        />
+                      </div>
+                      <div className="relative">
+                        <Phone
+                          className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground"
+                          size={24}
+                        />
+                        <input
+                          type="tel"
+                          placeholder="Telefone (com DDD)"
+                          value={phone}
+                          onChange={(e) =>
+                            setPhone(formatAndLimitPhone(e.target.value))
+                          }
+                          className="w-full pl-12 pr-4 py-4 md:py-5 text-lg md:text-xl rounded-2xl bg-background border border-input text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring transition-all"
+                          required
+                          autoComplete="off"
+                        />
+                      </div>
+                      {activeTab === "driver" && (
+                        <div className="relative">
+                          <Hash
+                            className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground"
+                            size={24}
+                          />
+                          <input
+                            type="text"
+                            placeholder="ID de Motorista (fornecido pelo admin)"
+                            value={driverId}
+                            onChange={(e) => setDriverId(e.target.value)}
+                            className="w-full pl-12 pr-4 py-4 md:py-5 text-lg md:text-xl rounded-2xl bg-background border border-input text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring transition-all"
+                            required
+                            autoComplete="off"
+                          />
+                        </div>
+                      )}
+                      <div className="relative">
+                        <Mail
+                          className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground"
+                          size={24}
+                        />
+                        <input
+                          type="email"
+                          placeholder="E-mail"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          className="w-full pl-12 pr-4 py-4 md:py-5 text-lg md:text-xl rounded-2xl bg-background border border-input text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring transition-all"
+                          required
+                          autoComplete="off"
+                        />
+                      </div>
+                      <div className="relative">
+                        <Lock
+                          className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground"
+                          size={24}
+                        />
+                        <input
+                          type={showPassword ? "text" : "password"}
+                          placeholder="Senha (mínimo 6 caracteres)"
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          className="w-full pl-12 pr-12 py-4 md:py-5 text-lg md:text-xl rounded-2xl bg-background border border-input text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring transition-all"
+                          required
+                          autoComplete="new-password"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          {showPassword ? (
+                            <EyeOff size={20} />
+                          ) : (
+                            <Eye size={20} />
+                          )}
+                        </button>
+                      </div>
+                      <button
+                        type="submit"
+                        disabled={loading}
+                        className="w-full flex justify-center items-center gap-3 py-4 md:py-5 px-4 rounded-2xl text-lg md:text-xl font-semibold text-primary-foreground bg-primary hover:bg-primary/90 transition-all shadow-lg disabled:opacity-50"
+                      >
+                        {loading ? (
+                          <>
+                            <Loading size="sm" variant="spinner" />
+                            <span
+                              className="font-semibold tracking-wide"
+                              style={{
+                                fontFamily:
+                                  "system-ui, -apple-system, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif",
+                                letterSpacing: "0.5px",
+                              }}
+                            >
+                              Cadastrando...
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <UserPlus size={20} />
+                            <span>Cadastrar</span>
+                          </>
+                        )}
+                      </button>
+                    </motion.form>
+                  )}
+                </AnimatePresence>
+
+                <div
+                  className="pt-4 md:pt-6 text-base md:text-lg"
+                  style={{ color: "#FFFFFF" }}
+                >
+                  <button
+                    onClick={() => {
+                      setPreviousTab(activeTab);
+                      setIsLoginView(!isLoginView);
+                      setError("");
+                      setSuccessMessage("");
+                    }}
+                    className="font-medium text-orange-400 hover:text-orange-300 transition-colors"
+                  >
+                    {isLoginView
+                      ? "Não tem uma conta? Cadastre-se"
+                      : "Já tem uma conta? Faça login"}
+                  </button>
+                </div>
+
+                <div className="mt-8 md:mt-10 relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <div
+                      className="w-full border-t"
+                      style={{ borderColor: "rgba(255, 255, 255, 0.2)" }}
+                    />
+                  </div>
+                  <div
+                    className="relative flex justify-center text-base md:text-lg"
+                    style={{ color: "#E2E8F0" }}
+                  >
+                    <span
+                      className="px-4 rounded-full"
+                      style={{
+                        background: "rgba(255, 255, 255, 0.1)",
+                        backdropFilter: "blur(8px)",
+                      }}
+                    >
+                      Ou
+                    </span>
                   </div>
                 </div>
+
+                <div className="mt-8 md:mt-10">
+                  <button
+                    onClick={() => handleGoogleSignIn(activeTab)}
+                    disabled={loading}
+                    className="w-full flex justify-center items-center gap-3 py-4 md:py-5 px-4 rounded-2xl border border-border bg-secondary text-secondary-foreground text-base md:text-lg font-medium hover:bg-secondary/80 disabled:opacity-50 transition-all"
+                  >
+                    <GoogleIcon /> Entrar com o Google
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
 
           {/* Imagem lateral com formato arredondado interno - melhorada */}
-          <motion.div 
+          <motion.div
             className="hidden md:block w-[42%] relative m-4 overflow-hidden flex-shrink-0"
             initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ 
+            animate={{
               opacity: isExpanded ? 1 : 0,
               scale: isExpanded ? 1 : 0.9,
             }}
-            transition={{ 
+            transition={{
               duration: 0.2,
               ease: [0.22, 1, 0.36, 1],
               delay: 0.05,
@@ -1470,18 +1649,18 @@ export const AuthPage = () => {
               `,
             }}
           >
-            <div 
+            <div
               className="absolute inset-0 bg-[url('/SP3.jpg')] bg-cover bg-center"
               style={{ borderRadius: "1.5rem" }}
             />
-            <div 
+            <div
               className="absolute inset-0 bg-gradient-to-br from-slate-900/20 via-transparent to-slate-900/40"
               style={{ borderRadius: "1.5rem" }}
             />
           </motion.div>
         </motion.div>
       </motion.div>
-      
+
       {/* Assinatura do desenvolvedor no rodapé */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -1489,10 +1668,13 @@ export const AuthPage = () => {
         transition={{ delay: 0.5, duration: 0.6 }}
         className="absolute bottom-6 left-6 z-20"
       >
-        <div className="flex items-center gap-3 px-6 py-3 rounded-2xl backdrop-blur-md border border-white/20"
+        <div
+          className="flex items-center gap-3 px-6 py-3 rounded-2xl backdrop-blur-md border border-white/20"
           style={{
-            background: "linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%)",
-            boxShadow: "0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1)",
+            background:
+              "linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%)",
+            boxShadow:
+              "0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1)",
           }}
         >
           <div className="flex items-center gap-2">
@@ -1526,8 +1708,12 @@ export const AuthPage = () => {
               </svg>
             </motion.div>
             <div className="flex flex-col">
-              <span className="text-sm font-bold text-white leading-tight">Daniel Pires</span>
-              <span className="text-xs text-white/70 leading-tight">Desenvolvedor</span>
+              <span className="text-sm font-bold text-white leading-tight">
+                Daniel Pires
+              </span>
+              <span className="text-xs text-white/70 leading-tight">
+                Desenvolvedor
+              </span>
             </div>
           </div>
           <motion.div
@@ -1548,6 +1734,158 @@ export const AuthPage = () => {
           />
         </div>
       </motion.div>
+
+      {/* Modal de Recuperação de Senha */}
+      <AnimatePresence>
+        {showRecoverModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+            onClick={() => setShowRecoverModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-md rounded-2xl border shadow-2xl overflow-hidden"
+              style={{
+                background: "#1c1410",
+                borderColor: "rgba(249, 115, 22, 0.3)",
+                boxShadow:
+                  "0 25px 50px -12px rgba(249, 115, 22, 0.4), inset 0 1px 0 0 rgba(249, 115, 22, 0.1)",
+              }}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between p-6 border-b border-orange-500/30">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-xl bg-orange-500/20 border border-orange-500/30">
+                    <KeyRound size={24} className="text-orange-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-white">
+                      Recuperar Senha
+                    </h3>
+                    <p className="text-sm text-white/60">
+                      Digite seu e-mail para receber o link
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowRecoverModal(false)}
+                  className="p-2 rounded-lg hover:bg-white/10 transition-colors text-white/60 hover:text-white"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              {/* Body */}
+              <form onSubmit={handlePasswordRecovery} className="p-6 space-y-6">
+                {/* Input de E-mail */}
+                <div className="relative">
+                  <Mail
+                    className="absolute left-4 top-1/2 -translate-y-1/2 text-orange-400/60"
+                    size={20}
+                  />
+                  <input
+                    type="email"
+                    placeholder="Seu e-mail cadastrado"
+                    value={recoverEmail}
+                    onChange={(e) => setRecoverEmail(e.target.value)}
+                    className="w-full pl-12 pr-4 py-4 text-base rounded-xl text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-orange-500/50 transition-all border"
+                    style={{
+                      background: "#2a1712",
+                      borderColor: "rgba(249, 115, 22, 0.3)",
+                    }}
+                    required
+                    disabled={recoverLoading || recoverSuccess}
+                  />
+                </div>
+
+                {/* Mensagens de erro e sucesso */}
+                {recoverError && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="p-4 rounded-xl border border-red-500/30 bg-red-900/20"
+                  >
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle size={18} className="text-red-400" />
+                      <p className="text-sm text-red-300">{recoverError}</p>
+                    </div>
+                  </motion.div>
+                )}
+
+                {recoverSuccess && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="p-4 rounded-xl border border-green-500/30 bg-green-900/20"
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className="flex-shrink-0 w-5 h-5 rounded-full bg-green-500 flex items-center justify-center">
+                        <svg
+                          width="12"
+                          height="12"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="white"
+                          strokeWidth="3"
+                        >
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                      </div>
+                      <p className="text-sm text-green-300">
+                        E-mail de recuperação enviado! Verifique sua caixa de
+                        entrada.
+                      </p>
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* Botões */}
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowRecoverModal(false)}
+                    className="flex-1 py-3 px-4 rounded-xl font-semibold text-white/70 hover:text-white hover:bg-white/10 transition-all border border-white/10"
+                    disabled={recoverLoading}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={recoverLoading || recoverSuccess}
+                    className="flex-1 py-3 px-4 rounded-xl font-semibold text-white transition-all shadow-lg disabled:opacity-50 flex items-center justify-center gap-2"
+                    style={{
+                      background:
+                        recoverLoading || recoverSuccess
+                          ? "linear-gradient(135deg, #94a3b8 0%, #64748b 100%)"
+                          : "linear-gradient(135deg, #ea580c 0%, #f97316 100%)",
+                      boxShadow:
+                        recoverLoading || recoverSuccess
+                          ? "0 4px 15px rgba(0, 0, 0, 0.2)"
+                          : "0 10px 30px rgba(234, 88, 12, 0.5)",
+                    }}
+                  >
+                    {recoverLoading ? (
+                      <>
+                        <Loading size="sm" variant="spinner" />
+                        <span>Enviando...</span>
+                      </>
+                    ) : (
+                      <span>Enviar Link</span>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

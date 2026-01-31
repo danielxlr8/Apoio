@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import imageCompression from "browser-image-compression";
 import Joyride, {
   Step,
   CallBackProps,
@@ -9,6 +8,18 @@ import Joyride, {
 } from "react-joyride";
 import Confetti from "react-confetti";
 import type { Driver, SupportCall, UrgencyLevel } from "../types/logistics";
+
+// --- IMPORT LOTTIE ---
+import Lottie from "lottie-react";
+
+import { MapContainer, TileLayer, Marker, Popup, Circle } from "react-leaflet";
+import "leaflet/dist/leaflet.css";
+import L from "leaflet";
+
+import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
+import markerIcon from "leaflet/dist/images/marker-icon.png";
+import markerShadow from "leaflet/dist/images/marker-shadow.png";
+
 import {
   Clock,
   AlertTriangle,
@@ -21,7 +32,6 @@ import {
   VolumeX,
   Calendar as CalendarIcon,
   Lock,
-  Navigation as NavigationIcon,
   History as HistoryIcon,
   Sun,
   Moon,
@@ -41,7 +51,11 @@ import {
   CalendarClock,
   Image as ImageIcon,
   Download,
-  X as XIcon,
+  Map as MapIcon,
+  Trophy,
+  Star,
+  Mic,
+  Smartphone,
 } from "lucide-react";
 import { auth, db, storage } from "../firebase";
 import {
@@ -59,6 +73,8 @@ import {
   getDocs,
   orderBy,
   addDoc,
+  GeoPoint,
+  runTransaction,
 } from "firebase/firestore";
 import {
   updatePassword,
@@ -71,6 +87,7 @@ import {
   getDownloadURL,
   deleteObject,
 } from "firebase/storage";
+import { increment } from "firebase/firestore";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
 import { cn } from "../lib/utils";
@@ -81,10 +98,9 @@ import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
-// Imports organizados
 import { ProfileHeaderCard, StatusSection } from "./driver";
 import { UrgencyBadge } from "./driver/components/UrgencyBadge";
-import { CustomTooltip } from "./driver/CustomTooltip"; // Assegure-se que este import existe
+import { CustomTooltip } from "./driver/CustomTooltip";
 import { HUBS } from "../constants/hubs";
 import { VEHICLE_TYPES } from "../constants/vehicleTypes";
 import { SUPPORT_REASONS } from "../constants/supportReasons";
@@ -98,13 +114,75 @@ import { toast as sonnerToast } from "sonner";
 import { Loading, LoadingOverlay } from "./ui/loading";
 import { usePresence } from "../hooks/usePresence";
 
+// Correção Leaflet
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: markerIcon2x,
+  iconUrl: markerIcon,
+  shadowUrl: markerShadow,
+});
+
 interface DriverInterfaceProps {
   driver: Driver;
 }
 
 const sessionNotifiedCallIds = new Set<string>();
 
-// DriverCallHistoryCard
+const getGenderAvatar = (name: string, gender?: string) => {
+  const seed = name || "User";
+  if (gender === "Mulher") {
+    return `https://avatar.iran.liara.run/public/girl?username=${seed}`;
+  }
+  return `https://avatar.iran.liara.run/public/boy?username=${seed}`;
+};
+
+const getMockCoordinates = (id: string) => {
+  const baseLat = -25.4284;
+  const baseLng = -49.2733;
+  const pseudoRandom = id
+    .split("")
+    .reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  const offsetLat = (pseudoRandom % 100) / 2000;
+  const offsetLng = (pseudoRandom % 100) / 2000;
+  return [baseLat + offsetLat, baseLng + offsetLng] as [number, number];
+};
+
+const generateSecurityCode = (): string => {
+  return Math.floor(1000 + Math.random() * 9000).toString();
+};
+
+const StarRating = ({
+  rating,
+  onRate,
+  readOnly = false,
+}: {
+  rating: number;
+  onRate?: (r: number) => void;
+  readOnly?: boolean;
+}) => {
+  const [hover, setHover] = useState(0);
+  return (
+    <div className="flex gap-1">
+      {[1, 2, 3, 4, 5].map((star) => (
+        <Star
+          key={star}
+          size={16}
+          className={cn(
+            "transition-colors",
+            readOnly ? "cursor-default" : "cursor-pointer",
+            (hover || rating) >= star
+              ? "fill-yellow-400 text-yellow-400"
+              : "text-gray-300",
+          )}
+          onMouseEnter={() => !readOnly && setHover(star)}
+          onMouseLeave={() => !readOnly && setHover(0)}
+          onClick={() => !readOnly && onRate && onRate(star)}
+        />
+      ))}
+    </div>
+  );
+};
+
 const DriverCallHistoryCard = ({
   call,
   userId,
@@ -113,19 +191,16 @@ const DriverCallHistoryCard = ({
   onRequestApproval,
   onCancelSupport,
   onDeleteSupportRequest,
+  onRateDriver,
 }: any) => {
   const isRequester = call.solicitante.id === userId;
-  const isPrestador = call.prestador?.id === userId;
-
-  // Quem é a outra parte (para contato via WhatsApp)
   const otherPartyId = isRequester ? call.assignedTo : call.solicitante.id;
   const otherParty = allDrivers.find((d: Driver) => d.uid === otherPartyId);
-
-  // Informações do solicitante (sempre disponível)
   const solicitante = call.solicitante;
-
-  // Informações do prestador (quando chamado foi aceito)
   const prestador = call.prestador || null;
+
+  const [pin, setPin] = useState("");
+  const [showPinInput, setShowPinInput] = useState(false);
 
   const handleWhatsAppClick = () => {
     if (!otherParty?.phone)
@@ -134,6 +209,18 @@ const DriverCallHistoryCard = ({
       `Olá, sou ${driver.name} referente ao apoio logístico.`,
     );
     window.open(`https://wa.me/55${otherParty.phone}?text=${msg}`, "_blank");
+  };
+
+  const handleVerifyAndFinish = () => {
+    if (pin === call.securityCode) {
+      onRequestApproval(call.id);
+    } else {
+      showNotification(
+        "error",
+        "PIN Incorreto",
+        "O código digitado não confere com o do solicitante.",
+      );
+    }
   };
 
   const isDark = document.documentElement.classList.contains("dark");
@@ -237,8 +324,6 @@ const DriverCallHistoryCard = ({
             {call.packageCount || 0} un.
           </span>
         </div>
-
-        {/* CORREÇÃO 6: Mostrar informações do Solicitante */}
         <div className="col-span-2">
           <span
             className={cn(
@@ -270,8 +355,6 @@ const DriverCallHistoryCard = ({
             </div>
           </div>
         </div>
-
-        {/* CORREÇÃO 6: Mostrar informações do Prestador (quem aceitou) */}
         {prestador && (
           <div className="col-span-2">
             <span
@@ -305,8 +388,6 @@ const DriverCallHistoryCard = ({
             </div>
           </div>
         )}
-
-        {/* CORREÇÃO 4: Mostrar localização do solicitante */}
         <div className="col-span-2">
           <span
             className={cn(
@@ -330,7 +411,35 @@ const DriverCallHistoryCard = ({
             <MapPin size={12} /> {call.location} <ExternalLink size={10} />
           </a>
         </div>
-
+        {call.status === "CONCLUIDO" && isRequester && (
+          <div className="col-span-2 p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/30 mt-2">
+            <div className="flex justify-between items-center">
+              <span
+                className={cn(
+                  "text-xs font-bold",
+                  isDark ? "text-yellow-200" : "text-yellow-800",
+                )}
+              >
+                {call.rating ? "Sua Avaliação:" : "Avalie o apoio:"}
+              </span>
+              <StarRating
+                rating={call.rating || 0}
+                readOnly={!!call.rating}
+                onRate={(r) => onRateDriver(call.id, call.assignedTo, r)}
+              />
+            </div>
+          </div>
+        )}
+        {call.securityCode && call.status !== "CONCLUIDO" && isRequester && (
+          <div className="col-span-2 p-2 rounded-xl border border-dashed border-primary/50 bg-primary/5 flex items-center justify-between">
+            <span className="text-xs font-bold text-primary flex items-center gap-2">
+              <Lock size={12} /> PIN DE SEGURANÇA:
+            </span>
+            <span className="text-sm font-mono font-bold text-primary tracking-widest bg-white/50 dark:bg-black/20 px-2 rounded">
+              {call.securityCode}
+            </span>
+          </div>
+        )}
         {call.cargoPhotoUrl && (
           <div className="col-span-2 p-2 rounded-xl bg-orange-500/10 dark:bg-orange-500/10 border border-orange-500/30">
             <div className="flex items-center justify-between">
@@ -350,8 +459,7 @@ const DriverCallHistoryCard = ({
                 rel="noopener noreferrer"
                 className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold text-white bg-orange-500 hover:bg-orange-600 transition-all shadow-md"
               >
-                <Download size={12} />
-                <span>Baixar</span>
+                <Download size={12} /> <span>Baixar</span>
               </a>
             </div>
           </div>
@@ -381,13 +489,42 @@ const DriverCallHistoryCard = ({
           )}
           {!isRequester && call.status === "EM ANDAMENTO" && (
             <>
-              <Button
-                size="sm"
-                onClick={() => onRequestApproval(call.id)}
-                className="h-8 text-xs bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl shadow-lg shadow-primary/30"
-              >
-                <CheckCircle size={14} className="mr-1" /> Finalizar
-              </Button>
+              {showPinInput ? (
+                <div className="flex gap-2 w-full animate-in fade-in slide-in-from-bottom-2">
+                  <input
+                    type="text"
+                    maxLength={4}
+                    value={pin}
+                    onChange={(e) => setPin(e.target.value)}
+                    placeholder="PIN"
+                    className="h-8 w-20 text-center rounded-xl border border-slate-300 text-xs text-slate-800"
+                  />
+                  <Button
+                    size="sm"
+                    onClick={handleVerifyAndFinish}
+                    className="h-8 text-xs bg-green-600 hover:bg-green-700 text-white rounded-xl flex-1"
+                  >
+                    Confirmar
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setShowPinInput(false)}
+                    className="h-8 text-xs rounded-xl"
+                  >
+                    X
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  size="sm"
+                  onClick={() => setShowPinInput(true)}
+                  className="h-8 text-xs bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl shadow-lg shadow-primary/30"
+                >
+                  <CheckCircle size={14} className="mr-1" /> Encaminhar para
+                  Aprovação
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 size="sm"
@@ -415,7 +552,6 @@ const DriverCallHistoryCard = ({
 };
 
 export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
-  // --- Estados ---
   const [allMyCalls, setAllMyCalls] = useState<SupportCall[]>([]);
   const [openSupportCalls, setOpenSupportCalls] = useState<SupportCall[]>([]);
   const [allDrivers, setAllDrivers] = useState<Driver[]>([]);
@@ -427,8 +563,11 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     driver?.status || "INDISPONIVEL",
   );
 
-  // Form States
   const [location, setLocation] = useState("");
+  const [coordinates, setCoordinates] = useState<{
+    lat: number;
+    lng: number;
+  } | null>(null);
   const [isLocating, setIsLocating] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [modalError, setModalError] = useState("");
@@ -444,11 +583,12 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     null,
   );
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [isListening, setIsListening] = useState(false);
 
-  // Profile States
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [vehicleType, setVehicleType] = useState("");
+  const [gender, setGender] = useState<string>("");
   const [hubSearch, setHubSearch] = useState("");
   const [isHubDropdownOpen, setIsHubDropdownOpen] = useState(false);
   const [shopeeId, setShopeeId] = useState<string | null>(null);
@@ -462,7 +602,11 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [currentDateTime, setCurrentDateTime] = useState<Date>(new Date());
 
-  // UI States
+  // --- STATE DO LOTTIE ---
+  const [bgAnimation, setBgAnimation] = useState<any>(null);
+
+  const [installPrompt, setInstallPrompt] = useState<any>(null);
+
   const [historyFilter, setHistoryFilter] = useState<
     "all" | "requester" | "provider" | "inProgress"
   >("all");
@@ -479,7 +623,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
   const [isProfileWarningVisible, setIsProfileWarningVisible] = useState(true);
   const [acceptingCallId, setAcceptingCallId] = useState<string | null>(null);
 
-  // --- JOYRIDE STATES (TOUR) ---
   const [runTour, setRunTour] = useState(false);
   const [tourStepIndex, setTourStepIndex] = useState(0);
   const [showConfetti, setShowConfetti] = useState(false);
@@ -488,7 +631,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
   const userId = auth.currentUser?.uid;
   const isInitialOpenCallsLoad = useRef(true);
 
-  // --- CONFIGURAÇÃO DOS PASSOS DO TUTORIAL ---
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
 
   const tourSteps: Step[] = [
@@ -509,7 +651,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       placement: "auto",
       data: { mood: "point-right" },
     },
-    // PASSO DE PREVISÃO DO TEMPO (SIMPLIFICADO E ESTÁTICO)
     {
       target: "#weather-card-container",
       content:
@@ -543,7 +684,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       placement: "auto",
       data: { mood: "point-right" },
     },
-    // PASSO DO CHATBOT (COM TARGET FIXO)
     {
       target: "#chatbot-tour-target",
       content:
@@ -553,13 +693,8 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       data: { mood: "chicken" },
       spotlightPadding: 5,
       styles: {
-        overlay: {
-          backgroundColor: "transparent",
-          mixBlendMode: "normal",
-        },
-        spotlight: {
-          backgroundColor: "transparent",
-        },
+        overlay: { backgroundColor: "transparent", mixBlendMode: "normal" },
+        spotlight: { backgroundColor: "transparent" },
       },
     },
     {
@@ -572,7 +707,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     },
   ];
 
-  // --- HOOKS ---
   usePresence(
     userId || null,
     "driver",
@@ -590,6 +724,8 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       { id: "availability", label: "Status", icon: <Zap size={20} /> },
       { id: "support", label: "Apoio", icon: <AlertTriangle size={20} /> },
       { id: "activeCalls", label: "Chamados", icon: <Clock size={20} /> },
+      { id: "map", label: "Mapa", icon: <MapIcon size={20} /> },
+      { id: "ranking", label: "Ranking", icon: <Trophy size={20} /> },
       { id: "tutorial", label: "Ajuda", icon: <BookOpen size={20} /> },
       { id: "profile", label: "Perfil", icon: <User size={20} /> },
     ],
@@ -601,7 +737,9 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     | "support"
     | "activeCalls"
     | "tutorial"
-    | "profile";
+    | "profile"
+    | "map"
+    | "ranking";
   const [activeTab, setActiveTab] = useState<TabId>("profile");
 
   const isProfileComplete = useMemo(() => {
@@ -616,7 +754,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     );
   }, [driver, shopeeId]);
 
-  // LOGICA ADICIONADA: Verifica status ABERTO, EM ANDAMENTO ou AGUARDANDO_APROVACAO
   const activeCallForDriver = useMemo(() => {
     return (
       allMyCalls.find(
@@ -626,6 +763,12 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
             call.status,
           ),
       ) || null
+    );
+  }, [allMyCalls, userId]);
+
+  const activeProviderCall = useMemo(() => {
+    return allMyCalls.find(
+      (c) => c.assignedTo === userId && ["EM ANDAMENTO"].includes(c.status),
     );
   }, [allMyCalls, userId]);
 
@@ -668,7 +811,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     () =>
       openSupportCalls.filter(
         (c) =>
-          // CORREÇÃO 3: Não mostrar chamados do próprio motorista
           c.solicitante.id !== userId &&
           (globalHubFilter === "Todos os Hubs" || c.hub === globalHubFilter) &&
           (!routeIdSearch ||
@@ -677,11 +819,61 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     [openSupportCalls, routeIdSearch, globalHubFilter, userId],
   );
 
-  // --- Efeitos ---
+  const rankedDrivers = useMemo(() => {
+    return [...allDrivers]
+      .filter((d) => (d as any).completedSupports > 0)
+      .sort((a, b) => {
+        const supportsA = (a as any).completedSupports || 0;
+        const supportsB = (b as any).completedSupports || 0;
+        if (supportsA !== supportsB) return supportsB - supportsA;
+        const ratingA = (a as any).ratingAverage || 0;
+        const ratingB = (b as any).ratingAverage || 0;
+        return ratingB - ratingA;
+      })
+      .slice(0, 10);
+  }, [allDrivers]);
+
+  // --- EFEITO PARA CARREGAR O JSON DE ANIMAÇÃO ---
+  useEffect(() => {
+    if (activeTab === "ranking" && !bgAnimation) {
+      fetch("/SynthRunner.json")
+        .then((response) => {
+          if (!response.ok) throw new Error("Erro ao carregar JSON");
+          return response.json();
+        })
+        .then((data) => setBgAnimation(data))
+        .catch((err) =>
+          console.error("Falha ao carregar animação Lottie:", err),
+        );
+    }
+  }, [activeTab, bgAnimation]);
+
   useEffect(() => {
     const isDark = document.documentElement.classList.contains("dark");
     setTheme(isDark ? "dark" : "light");
   }, []);
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setInstallPrompt(e);
+    };
+    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+    return () =>
+      window.removeEventListener(
+        "beforeinstallprompt",
+        handleBeforeInstallPrompt,
+      );
+  }, []);
+
+  const handleInstallPWA = () => {
+    if (installPrompt) {
+      installPrompt.prompt();
+      installPrompt.userChoice.then((choiceResult: any) => {
+        if (choiceResult.outcome === "accepted") setInstallPrompt(null);
+      });
+    }
+  };
 
   useEffect(() => {
     const updateDateTime = () => {
@@ -690,10 +882,8 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       );
       setCurrentDateTime(brazilTime);
     };
-
     updateDateTime();
     const interval = setInterval(updateDateTime, 1000);
-
     return () => clearInterval(interval);
   }, []);
 
@@ -706,7 +896,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     localStorage.setItem("theme", newTheme);
   };
 
-  // Trava de segurança e redirecionamento inicial
   useEffect(() => {
     if (isProfileComplete && !initialTabSet) {
       setActiveTab("availability");
@@ -717,14 +906,13 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     }
   }, [isProfileComplete, initialTabSet]);
 
-  // Se o tour não está rodando e o perfil está incompleto, força ir para o perfil
   useEffect(() => {
     if (!isProfileComplete && !runTour && activeTab !== "profile") {
       setActiveTab("profile");
       showNotification(
         "error",
         "Perfil Incompleto",
-        "Por favor, preencha seus dados para liberar o acesso.",
+        "Por favor, preencha seus dados.",
       );
     }
   }, [isProfileComplete, runTour, activeTab]);
@@ -735,61 +923,45 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       setPhone(driver.phone || "");
       setHub(driver.hub || "");
       setVehicleType(driver.vehicleType || "");
+      setGender((driver as any).gender || "Homem");
       setHubSearch(driver.hub || "");
       setLocalDriverStatus(driver.status || "INDISPONIVEL");
     }
   }, [driver]);
 
-  // INICIA O TOUR
   useEffect(() => {
-    if (!userId || !driver) return;
-
-    // Versão da chave de tour (v35)
     const tourKey = `driver-tour-seen-v35-${userId}`;
     const hasSeenTour = localStorage.getItem(tourKey);
-
     if (!hasSeenTour) {
       setTimeout(() => setRunTour(true), 2000);
     }
   }, [driver, userId]);
 
-  // --- CALLBACK JOYRIDE ---
   const handleJoyrideCallback = (data: CallBackProps) => {
     const { status, type, index, action } = data;
     const finishedStatuses: string[] = [STATUS.FINISHED, STATUS.SKIPPED];
-
     if (type === EVENTS.STEP_AFTER) {
       if (action === ACTIONS.NEXT) {
         const nextIndex = index + 1;
-
-        // Navegação simples entre abas baseada no índice do passo
-        if (nextIndex === 1) setActiveTab("availability"); // Switch
-        if (nextIndex === 2) setActiveTab("availability"); // Clima
-        if (nextIndex === 3) setActiveTab("support"); // Botão Socorro
-        if (nextIndex === 4) setActiveTab("activeCalls"); // Histórico
-        if (nextIndex === 5) setActiveTab("profile"); // Perfil
-
-        setTimeout(() => {
-          setTourStepIndex(nextIndex);
-        }, 400);
+        if ([1, 2].includes(nextIndex)) setActiveTab("availability");
+        if (nextIndex === 3) setActiveTab("support");
+        if (nextIndex === 4) setActiveTab("activeCalls");
+        if (nextIndex === 5) setActiveTab("profile");
+        setTimeout(() => setTourStepIndex(nextIndex), 400);
       }
-
       if (action === ACTIONS.PREV) {
         const prevIndex = index - 1;
-        if (prevIndex === 1) setActiveTab("availability");
-        if (prevIndex === 2) setActiveTab("availability");
+        if ([1, 2].includes(prevIndex)) setActiveTab("availability");
         if (prevIndex === 3) setActiveTab("support");
         if (prevIndex === 4) setActiveTab("activeCalls");
         if (prevIndex === 5) setActiveTab("profile");
         setTimeout(() => setTourStepIndex(prevIndex), 400);
       }
     }
-
     if (finishedStatuses.includes(status)) {
       setRunTour(false);
-      if (userId) {
+      if (userId)
         localStorage.setItem(`driver-tour-seen-v35-${userId}`, "true");
-      }
       if (status === STATUS.FINISHED) {
         setShowConfetti(true);
         setTimeout(() => setShowConfetti(false), 8000);
@@ -811,11 +983,8 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
         );
         try {
           const querySnapshot = await getDocs(q);
-          if (!querySnapshot.empty) {
-            setShopeeId(querySnapshot.docs[0].id);
-          } else {
-            setShopeeId("Não encontrado");
-          }
+          if (!querySnapshot.empty) setShopeeId(querySnapshot.docs[0].id);
+          else setShopeeId("Não encontrado");
         } catch (error) {
           setShopeeId("Erro ao buscar");
         }
@@ -861,7 +1030,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
   };
 
   const triggerNotificationRef = useRef((_newCall: SupportCall) => {});
-
   useEffect(() => {
     triggerNotificationRef.current = (newCall: SupportCall) => {
       if (
@@ -920,7 +1088,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       ),
       orderBy("timestamp", "desc"),
     );
-
     const unsubscribeMyCalls = onSnapshot(myCallsQuery, (snapshot) => {
       const callsData = snapshot.docs.map(
         (doc) => ({ id: doc.id, ...doc.data() }) as SupportCall,
@@ -983,32 +1150,23 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     });
   };
 
-  // --- HANDLERS ---
-
   const handleAddField = (
     setter: React.Dispatch<React.SetStateAction<string[]>>,
-  ) => {
-    setter((prev) => [...prev, ""]);
-  };
-
+  ) => setter((prev) => [...prev, ""]);
   const handleRemoveField = (
     index: number,
     setter: React.Dispatch<React.SetStateAction<string[]>>,
-  ) => {
-    setter((prev) => prev.filter((_, i) => i !== index));
-  };
-
+  ) => setter((prev) => prev.filter((_, i) => i !== index));
   const handleFieldChange = (
     index: number,
     value: string,
     setter: React.Dispatch<React.SetStateAction<string[]>>,
-  ) => {
+  ) =>
     setter((prev) => {
       const newValues = [...prev];
       newValues[index] = value;
       return newValues;
     });
-  };
 
   const handleAvailabilityChange = async (isAvailable: boolean) => {
     if (!isProfileComplete || !shopeeId)
@@ -1017,19 +1175,14 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
         "Perfil Incompleto",
         "Verifique seus dados.",
       );
-
-    // CORREÇÃO 2: Verificar se tem chamado aberto como solicitante
-    if (isAvailable && activeCallForDriver) {
+    if (isAvailable && (activeCallForDriver || activeProviderCall))
       return showNotification(
         "error",
-        "Chamado Ativo",
-        "Você tem uma solicitação de apoio em aberto. Não pode ficar disponível para aceitar rotas.",
+        "Ocupado",
+        "Você tem chamados ativos. Finalize-os antes.",
       );
-    }
-
     const newStatus = isAvailable ? "DISPONIVEL" : "INDISPONIVEL";
     setLocalDriverStatus(newStatus);
-
     try {
       await updateDriver(shopeeId, { status: newStatus });
     } catch (error) {
@@ -1044,11 +1197,8 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     if (localDriverStatus === "EM_ROTA")
       return showNotification("error", "Ocupado", "Você já está em rota.");
     setAcceptingCallId(callId);
-
     setLocalDriverStatus("EM_ROTA");
-
     try {
-      // CORREÇÃO 5: Salvar informações do prestador (quem aceitou)
       await updateCall(callId, {
         assignedTo: userId,
         status: "EM ANDAMENTO",
@@ -1070,19 +1220,25 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     }
   };
 
-  const handleRequestApproval = (id: string) => {
-    updateCall(id, { status: "AGUARDANDO_APROVACAO" })
-      .then(() =>
-        showNotification("success", "Sucesso", "Solicitado aprovação."),
-      )
-      .catch(() => showNotification("error", "Erro", "Falha na solicitação."));
+  const handleRequestApproval = async (id: string) => {
+    await updateCall(id, {
+      status: "CONCLUIDO",
+      securityCode: deleteField(),
+    } as any);
+    if (shopeeId) {
+      const driverRef = doc(db, "motoristas_pre_aprovados", shopeeId);
+      await updateDoc(driverRef, { completedSupports: increment(1) });
+    }
+    showNotification(
+      "success",
+      "Sucesso",
+      "Chamado concluído e contabilizado!",
+    );
   };
 
   const handleCancelSupport = async (id: string) => {
     if (!userId || !shopeeId) return;
-
     setLocalDriverStatus("DISPONIVEL");
-
     try {
       await updateCall(id, {
         assignedTo: deleteField(),
@@ -1104,6 +1260,51 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     showNotification("success", "Excluído", "Solicitação removida.");
   };
 
+  const handleRateDriver = async (
+    callId: string,
+    driverUid: string,
+    ratingValue: number,
+  ) => {
+    if (!driverUid)
+      return showNotification("error", "Erro", "Motorista não encontrado.");
+    try {
+      const q = query(
+        collection(db, "motoristas_pre_aprovados"),
+        where("uid", "==", driverUid),
+      );
+      const querySnapshot = await getDocs(q);
+      if (querySnapshot.empty)
+        throw new Error("Perfil do motorista não encontrado para avaliação.");
+      const driverDocRef = querySnapshot.docs[0].ref;
+      const callDocRef = doc(db, "supportCalls", callId);
+      await runTransaction(db, async (transaction) => {
+        const driverDoc = await transaction.get(driverDocRef);
+        if (!driverDoc.exists()) throw new Error("Motorista não existe!");
+        const data = driverDoc.data();
+        const currentAvg = data.ratingAverage || 5.0;
+        const currentCount = data.ratingCount || 0;
+        const newCount = currentCount + 1;
+        const newAvg = (currentAvg * currentCount + ratingValue) / newCount;
+        transaction.update(driverDocRef, {
+          ratingAverage: newAvg,
+          ratingCount: newCount,
+        });
+        transaction.update(callDocRef, { rating: ratingValue });
+      });
+      showNotification(
+        "success",
+        "Avaliado!",
+        `Você deu ${ratingValue} estrelas.`,
+      );
+    } catch (error: any) {
+      showNotification(
+        "error",
+        "Erro",
+        "Falha ao enviar avaliação: " + error.message,
+      );
+    }
+  };
+
   const handleUpdateProfile = async () => {
     if (!shopeeId) return;
     const cleanPhone = phone.replace(/\D/g, "");
@@ -1111,7 +1312,13 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       return showNotification("error", "Telefone", "Use DDD + 9 dígitos.");
     if (!HUBS.includes(hub as any))
       return showNotification("error", "Hub", "Selecione um Hub válido.");
-    await updateDriver(shopeeId, { name, phone: cleanPhone, hub, vehicleType });
+    await updateDriver(shopeeId, {
+      name,
+      phone: cleanPhone,
+      hub,
+      vehicleType,
+      gender,
+    } as any);
     showNotification("success", "Salvo", "Perfil atualizado.");
     setIsProfileWarningVisible(false);
   };
@@ -1187,6 +1394,10 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     setIsLocating(true);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
+        setCoordinates({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+        });
         setLocation(
           `http://maps.google.com/?q=${pos.coords.latitude},${pos.coords.longitude}`,
         );
@@ -1215,6 +1426,32 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     }
   };
 
+  const handleVoiceInput = (
+    field: "reason" | "description",
+    setter: React.Dispatch<React.SetStateAction<string>>,
+  ) => {
+    if (!("webkitSpeechRecognition" in window))
+      return showNotification(
+        "error",
+        "Não Suportado",
+        "Seu navegador não suporta voz.",
+      );
+    const recognition = new (window as any).webkitSpeechRecognition();
+    recognition.lang = "pt-BR";
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.onstart = () => {
+      setIsListening(true);
+      showNotification("info", "Ouvindo...", "Pode falar agora.");
+    };
+    recognition.onend = () => setIsListening(false);
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[0][0].transcript;
+      setter((prev) => (prev ? `${prev} ${transcript}` : transcript));
+    };
+    recognition.start();
+  };
+
   const handleSupportSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
@@ -1224,20 +1461,14 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       setIsSubmitting(false);
       return;
     }
-
-    // CORREÇÃO 1: Verificar se já tem chamado aberto
     if (activeCallForDriver) {
-      setModalError(
-        "Você já tem uma solicitação de apoio em aberto. Aguarde a conclusão antes de criar outra.",
-      );
+      setModalError("Você já tem uma solicitação de apoio em aberto.");
       setIsSubmitting(false);
       return;
     }
-
     const pkg = Number(packageCount);
     const regions = deliveryRegions.filter(Boolean);
     const vehicles = neededVehicles.filter(Boolean);
-
     if (pkg < 20) {
       setModalError("Mínimo 20 pacotes.");
       setIsSubmitting(false);
@@ -1255,7 +1486,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       setIsSubmitting(false);
       return;
     }
-
     let cargoPhotoUrl = null;
     if (cargoPhoto) {
       try {
@@ -1275,31 +1505,28 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
         setIsUploadingPhoto(false);
       }
     }
-
-    const informalDesc = `MOTIVO: ${reason}. DETALHES: ${description}. Hub: ${hub}. Loc: ${location}. Qtd: ${pkg}. Regiões: ${regions.join(
-      ", ",
-    )}. Veículos: ${vehicles.join(", ")}. ${isBulky ? "VOLUMOSO" : ""}`;
-
+    const informalDesc = `MOTIVO: ${reason}. DETALHES: ${description}. Hub: ${hub}. Loc: ${location}. Qtd: ${pkg}. Regiões: ${regions.join(", ")}. Veículos: ${vehicles.join(", ")}. ${isBulky ? "VOLUMOSO" : ""}`;
     try {
-      const professionalDesc = informalDesc;
-
       let urgency: UrgencyLevel = "BAIXA";
       if (pkg >= 100) urgency = "URGENTE";
       else if (pkg >= 90) urgency = "ALTA";
       else if (pkg >= 60) urgency = "MEDIA";
-
       const newCall = {
         routeId: `SPX-${Date.now().toString().slice(-6)}`,
-        description: professionalDesc,
+        description: informalDesc,
         urgency,
         location,
         status: "ABERTO",
+        securityCode: generateSecurityCode(),
         vehicleType: vehicles.join(", "),
         isBulky,
         hub,
         packageCount: pkg,
         deliveryRegions: regions,
         cargoPhotoUrl,
+        coordinates: coordinates
+          ? new GeoPoint(coordinates.lat, coordinates.lng)
+          : null,
         solicitante: {
           id: driver.uid,
           name: driver.name,
@@ -1309,7 +1536,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
           phone: driver.phone,
         },
       };
-
       await addNewCall(newCall);
       setIsSupportModalOpen(false);
       setShowSuccessModal(true);
@@ -1320,6 +1546,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       setPackageCount("");
       setCargoPhoto(null);
       setCargoPhotoPreview(null);
+      setCoordinates(null);
     } catch (err: any) {
       setModalError(err.message);
     } finally {
@@ -1327,14 +1554,12 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     }
   };
 
-  // --- RENDER ---
   return (
     <>
       <LoadingOverlay
         isLoading={isSubmitting || isReauthenticating}
         text="Processando..."
       />
-
       <Joyride
         steps={tourSteps}
         run={runTour}
@@ -1345,26 +1570,15 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
         disableOverlayClose={true}
         tooltipComponent={CustomTooltip}
         callback={handleJoyrideCallback}
-        // === CONFIGURAÇÕES GLOBAIS ===
         scrollOffset={isMobile ? 120 : 130}
         disableScrollParentFix={false}
-        spotlightClicks={true} // Permite clicar se quiser expandir
-        floaterProps={{
-          disableAnimation: true,
-          offset: 24,
-        }}
+        spotlightClicks={true}
+        floaterProps={{ disableAnimation: true, offset: 24 }}
         spotlightPadding={10}
         disableOverlay={!runTour}
-        styles={{
-          options: {
-            zIndex: 10000,
-            primaryColor: "#EE4D2D",
-          },
-        }}
+        styles={{ options: { zIndex: 10000, primaryColor: "#EE4D2D" } }}
       />
-
       {showConfetti && <Confetti numberOfPieces={500} recycle={false} />}
-
       <div
         className="min-h-dvh font-sans pb-24 transition-colors duration-300"
         style={{
@@ -1375,7 +1589,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
           backgroundAttachment: "fixed",
         }}
       >
-        {/* HEADER MODERNO */}
         <header
           className={cn(
             "sticky top-0 z-30 px-4 sm:px-6 py-4 flex justify-between items-center backdrop-blur-xl border-b transition-all",
@@ -1383,9 +1596,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
               ? "border-orange-500/30 bg-slate-900/85"
               : "border-orange-400/30 bg-white/85",
           )}
-          style={{
-            backdropFilter: "blur(12px)",
-          }}
+          style={{ backdropFilter: "blur(12px)" }}
         >
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl flex items-center justify-center text-primary-foreground bg-primary shadow-lg">
@@ -1396,6 +1607,15 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
             </h1>
           </div>
           <div className="flex gap-2">
+            {installPrompt && (
+              <button
+                onClick={handleInstallPWA}
+                className="w-10 h-10 rounded-xl flex items-center justify-center bg-accent animate-pulse"
+                title="Instalar App"
+              >
+                <Smartphone size={20} className="text-primary" />
+              </button>
+            )}
             <button
               onClick={toggleTheme}
               className="w-10 h-10 rounded-xl flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-all"
@@ -1413,7 +1633,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
           </div>
         </header>
 
-        {/* Warning Banner */}
         {!isProfileComplete && isProfileWarningVisible && (
           <div className="mx-4 mt-4 p-4 rounded-2xl flex justify-between items-center bg-orange-500/10 dark:bg-orange-500/10 border border-orange-500/30 dark:border-orange-500/30 shadow-lg">
             <div className="flex items-center gap-3">
@@ -1463,7 +1682,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
             accept="image/*"
           />
 
-          {/* TABS NAVIGATION MODERNAS */}
           <div
             className={cn(
               "p-1.5 rounded-2xl flex justify-between overflow-x-auto scrollbar-hide border shadow-lg transition-all duration-300",
@@ -1473,9 +1691,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
             )}
           >
             {TABS.map((tab) => {
-              // Bloqueia se perfil incompleto E não for a aba de perfil
               const isDisabled = !isProfileComplete && tab.id !== "profile";
-
               return (
                 <button
                   key={tab.id}
@@ -1511,7 +1727,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
             })}
           </div>
 
-          {/* TAB CONTENT AREAS */}
           <div className="min-h-[400px]">
             {activeTab === "availability" && (
               <div className="tab-content-enter tour-availability-switch">
@@ -1523,7 +1738,281 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                   onRouteIdSearchChange={setRouteIdSearch}
                   acceptingCallId={acceptingCallId}
                   onAcceptCall={handleAcceptCall}
+                  theme={theme}
                 />
+              </div>
+            )}
+            {activeTab === "map" && (
+              <div className="h-[60vh] rounded-2xl overflow-hidden border border-orange-200/50 shadow-xl relative z-0">
+                <MapContainer
+                  center={[-25.4284, -49.2733]}
+                  zoom={12}
+                  style={{ height: "100%", width: "100%" }}
+                >
+                  <TileLayer
+                    url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+                    attribution='© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                  />
+                  {filteredOpenCalls.map((call) => {
+                    const coords = (call as any).coordinates
+                      ? [
+                          (call as any).coordinates.latitude,
+                          (call as any).coordinates.longitude,
+                        ]
+                      : getMockCoordinates(call.id);
+                    return (
+                      <React.Fragment key={call.id}>
+                        <Circle
+                          center={coords as any}
+                          pathOptions={{
+                            fillColor: "#f97316",
+                            fillOpacity: 0.3,
+                            color: "transparent",
+                          }}
+                          radius={800}
+                        />
+                        <Marker position={coords as any}>
+                          <Popup>
+                            <div className="text-center">
+                              <p className="font-bold text-slate-800">
+                                {call.packageCount} Pacotes
+                              </p>
+                              <p className="text-xs text-slate-500">
+                                {call.routeId}
+                              </p>
+                              <Button
+                                size="sm"
+                                className="mt-2 w-full h-7 text-xs"
+                                onClick={() => handleAcceptCall(call.id)}
+                              >
+                                Aceitar
+                              </Button>
+                            </div>
+                          </Popup>
+                        </Marker>
+                      </React.Fragment>
+                    );
+                  })}
+                </MapContainer>
+                <div className="absolute top-2 right-2 bg-white/90 p-2 rounded-lg text-xs z-[1000] shadow-md border">
+                  <p className="font-bold text-slate-700">Legenda</p>
+                  <div className="flex items-center gap-1 mt-1">
+                    <div className="w-3 h-3 rounded-full bg-orange-500/50"></div>
+                    <span>Alta demanda</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* CORREÇÃO DO CARD DE RANKING (SUBSTITUIÇÃO DE VÍDEO POR LOTTIE) */}
+            {activeTab === "ranking" && (
+              <div className="space-y-6 pb-20">
+                <div className="flex justify-center items-end gap-4 pb-8 pt-4">
+                  {rankedDrivers[1] && (
+                    <div className="flex flex-col items-center">
+                      <div className="w-16 h-16 rounded-full border-4 border-slate-300 overflow-hidden shadow-lg mb-2 relative bg-slate-200">
+                        <img
+                          src={
+                            rankedDrivers[1].avatar ||
+                            `https://avatar.iran.liara.run/public/boy?username=${rankedDrivers[1].name}`
+                          }
+                          onError={(e) => {
+                            e.currentTarget.src = `https://avatar.iran.liara.run/public/boy?username=${rankedDrivers[1].name}`;
+                          }}
+                          className="w-full h-full object-cover"
+                          alt="2º Lugar"
+                        />
+                      </div>
+                      <div className="h-24 w-20 bg-slate-300/90 backdrop-blur-sm rounded-t-xl flex items-end justify-center pb-2 shadow-inner border-t border-white/30">
+                        <span className="text-3xl font-black text-white drop-shadow-md">
+                          2
+                        </span>
+                      </div>
+                      <p className="font-bold text-sm mt-1 text-slate-700 dark:text-slate-200 text-center truncate w-20">
+                        {rankedDrivers[1].name.split(" ")[0]}
+                      </p>
+                      <div className="flex items-center gap-1 bg-slate-200 text-slate-700 px-2 py-0.5 rounded-full text-[10px] font-bold mt-1">
+                        <Star size={10} fill="currentColor" />{" "}
+                        {(rankedDrivers[1] as any).ratingAverage?.toFixed(1) ||
+                          "5.0"}
+                      </div>
+                    </div>
+                  )}
+
+                  {rankedDrivers[0] && (
+                    <div className="flex flex-col items-center z-10 -mb-2">
+                      <div className="relative">
+                        <Trophy
+                          className="absolute -top-8 left-1/2 -translate-x-1/2 text-yellow-400 drop-shadow-xl animate-bounce"
+                          size={40}
+                          fill="currentColor"
+                        />
+                        <div className="w-24 h-24 rounded-full border-4 border-yellow-400 overflow-hidden shadow-2xl mb-2 bg-slate-200 relative">
+                          <img
+                            src={
+                              rankedDrivers[0].avatar ||
+                              `https://avatar.iran.liara.run/public/boy?username=${rankedDrivers[0].name}`
+                            }
+                            onError={(e) => {
+                              e.currentTarget.src = `https://avatar.iran.liara.run/public/boy?username=${rankedDrivers[0].name}`;
+                            }}
+                            className="w-full h-full object-cover"
+                            alt="1º Lugar"
+                          />
+                        </div>
+                      </div>
+                      <div className="h-36 w-28 bg-gradient-to-b from-yellow-400 to-yellow-600 rounded-t-xl flex items-end justify-center pb-4 shadow-xl border-t border-yellow-300 relative overflow-hidden">
+                        <div className="absolute inset-0 bg-white/20 animate-pulse" />
+                        <span className="text-6xl font-black text-white drop-shadow-lg z-10">
+                          1
+                        </span>
+                      </div>
+                      <p className="font-bold text-lg mt-1 text-slate-800 dark:text-white text-center truncate w-28">
+                        {rankedDrivers[0].name.split(" ")[0]}
+                      </p>
+                      <div className="flex items-center gap-1 bg-yellow-100 text-yellow-800 px-3 py-0.5 rounded-full text-xs font-bold mt-1 border border-yellow-200">
+                        <Star size={12} fill="currentColor" />{" "}
+                        {(rankedDrivers[0] as any).ratingAverage?.toFixed(1) ||
+                          "5.0"}
+                      </div>
+                    </div>
+                  )}
+
+                  {rankedDrivers[2] && (
+                    <div className="flex flex-col items-center">
+                      <div className="w-16 h-16 rounded-full border-4 border-orange-400 overflow-hidden shadow-lg mb-2 relative bg-slate-200">
+                        <img
+                          src={
+                            rankedDrivers[2].avatar ||
+                            `https://avatar.iran.liara.run/public/boy?username=${rankedDrivers[2].name}`
+                          }
+                          onError={(e) => {
+                            e.currentTarget.src = `https://avatar.iran.liara.run/public/boy?username=${rankedDrivers[2].name}`;
+                          }}
+                          className="w-full h-full object-cover"
+                          alt="3º Lugar"
+                        />
+                      </div>
+                      <div className="h-20 w-20 bg-orange-400/90 backdrop-blur-sm rounded-t-xl flex items-end justify-center pb-2 shadow-inner border-t border-white/30">
+                        <span className="text-3xl font-black text-white drop-shadow-md">
+                          3
+                        </span>
+                      </div>
+                      <p className="font-bold text-sm mt-1 text-slate-700 dark:text-slate-200 text-center truncate w-20">
+                        {rankedDrivers[2].name.split(" ")[0]}
+                      </p>
+                      <div className="flex items-center gap-1 bg-orange-100 text-orange-800 px-2 py-0.5 rounded-full text-[10px] font-bold mt-1">
+                        <Star size={10} fill="currentColor" />{" "}
+                        {(rankedDrivers[2] as any).ratingAverage?.toFixed(1) ||
+                          "5.0"}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="relative w-full h-80 rounded-3xl border border-orange-500/30 shadow-2xl overflow-hidden group transition-all hover:scale-[1.01]">
+                  {/* LOTTIE ANIMATION BACKGROUND */}
+                  {bgAnimation && (
+                    <div
+                      className={cn(
+                        "absolute inset-0 w-full h-full z-0 pointer-events-none",
+                        theme === "dark" ? "opacity-30" : "opacity-40",
+                      )}
+                    >
+                      <Lottie
+                        animationData={bgAnimation}
+                        loop={true}
+                        // A chave para o efeito "cover" é esta prop rendererSettings:
+                        rendererSettings={{
+                          preserveAspectRatio: "xMidYMid slice",
+                        }}
+                        className="w-full h-full"
+                        style={{ width: "100%", height: "100%" }}
+                      />
+                    </div>
+                  )}
+
+                  <div
+                    className={cn(
+                      "absolute inset-0 z-0 backdrop-blur-[2px]",
+                      theme === "dark"
+                        ? "bg-gradient-to-t from-slate-900 via-slate-900/80 to-transparent"
+                        : "bg-gradient-to-t from-white via-white/80 to-transparent",
+                    )}
+                  />
+                  <div className="relative z-10 p-6 h-full flex flex-col">
+                    <h3 className="text-lg font-black uppercase mb-4 flex items-center gap-2 tracking-wider">
+                      <Trophy
+                        size={20}
+                        className="text-yellow-500 drop-shadow-md"
+                        fill="currentColor"
+                      />
+                      <span
+                        className={
+                          theme === "dark" ? "text-white" : "text-slate-800"
+                        }
+                      >
+                        Ranking Geral
+                      </span>
+                    </h3>
+                    <div className="flex-1 overflow-y-auto pr-2 space-y-3 custom-scrollbar">
+                      {rankedDrivers.slice(3).map((d, idx) => (
+                        <div
+                          key={d.uid}
+                          className="flex items-center gap-4 p-3 bg-white/10 dark:bg-black/20 backdrop-blur-md rounded-2xl border border-white/10 hover:bg-white/20 transition-all"
+                        >
+                          <span className="w-8 text-center font-black text-xl text-slate-400/80">
+                            {idx + 4}
+                          </span>
+                          <div className="w-12 h-12 rounded-full bg-slate-200 border-2 border-white/20 overflow-hidden">
+                            <img
+                              src={
+                                d.avatar ||
+                                `https://avatar.iran.liara.run/public/boy?username=${d.name}`
+                              }
+                              onError={(e) => {
+                                e.currentTarget.src = `https://avatar.iran.liara.run/public/boy?username=${d.name}`;
+                              }}
+                              className="w-full h-full object-cover"
+                            />
+                          </div>
+                          <div className="flex-1">
+                            <p
+                              className={cn(
+                                "font-bold text-sm",
+                                theme === "dark"
+                                  ? "text-white"
+                                  : "text-slate-900",
+                              )}
+                            >
+                              {d.name}
+                            </p>
+                            <p className="text-xs text-slate-500 capitalize font-medium">
+                              {d.vehicleType || "Carro"}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <div className="flex items-center gap-1 text-yellow-500 font-bold text-sm justify-end drop-shadow-sm">
+                              <Star size={12} fill="currentColor" />{" "}
+                              {((d as any).ratingAverage || 5).toFixed(1)}
+                            </div>
+                            <p className="text-[10px] opacity-70 font-mono">
+                              {(d as any).completedSupports || 0} apoios
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                      {rankedDrivers.length <= 3 && (
+                        <div className="h-full flex flex-col items-center justify-center text-center opacity-50">
+                          <Trophy size={40} className="mb-2 text-slate-400" />
+                          <p className="text-sm">
+                            Ainda não há outros motoristas no ranking.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -1543,12 +2032,11 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                 </div>
                 <Button
                   onClick={() => {
-                    // LOGICA ADICIONADA: Se tiver chamado ativo, avisa e não abre o modal
                     if (activeCallForDriver) {
                       showNotification(
                         "error",
                         "Atenção",
-                        "Você já possui um chamado ativo ou em andamento. Finalize-o antes de criar um novo.",
+                        "Você já possui um chamado ativo.",
                       );
                       return;
                     }
@@ -1590,7 +2078,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     </button>
                   ))}
                 </div>
-
+                {/* CALENDARIOS (MANTIDOS ORIGINAIS) */}
                 <div className="flex gap-2 mb-2 flex-wrap items-center">
                   <Popover>
                     <PopoverTrigger asChild>
@@ -1653,7 +2141,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     </PopoverContent>
                   </Popover>
                 </div>
-
                 <div className="space-y-3">
                   {filteredCalls.length > 0 ? (
                     filteredCalls.map((call) => (
@@ -1666,6 +2153,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                         onRequestApproval={handleRequestApproval}
                         onCancelSupport={handleCancelSupport}
                         onDeleteSupportRequest={onDeleteSupportRequest}
+                        onRateDriver={handleRateDriver}
                       />
                     ))
                   ) : (
@@ -1871,7 +2359,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                   >
                     Meus Dados
                   </h4>
-
                   <div className="space-y-1">
                     <label
                       className={cn(
@@ -1897,7 +2384,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                             : "1px solid rgba(255, 168, 50, 0.3)",
                       }}
                     >
-                      {shopeeId}
+                      {shopeeId}{" "}
                       <Lock
                         size={14}
                         className={
@@ -1909,6 +2396,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     </div>
                   </div>
 
+                  {/* CAMPO DE HUB */}
                   <div className="space-y-1">
                     <label
                       className={cn(
@@ -1973,6 +2461,53 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     </div>
                   </div>
 
+                  {/* CAMPO DE SEXO (NOVO) */}
+                  <div className="space-y-1">
+                    <label
+                      className={cn(
+                        "text-xs font-bold",
+                        theme === "dark" ? "text-orange-300" : "text-slate-600",
+                      )}
+                    >
+                      Sexo
+                    </label>
+                    <select
+                      value={gender}
+                      onChange={(e) => setGender(e.target.value)}
+                      className={cn(
+                        "w-full p-4 rounded-xl text-sm font-medium capitalize focus:ring-2 focus:ring-orange-500/50 outline-none transition-all appearance-none cursor-pointer",
+                        theme === "dark" ? "text-white" : "text-slate-800",
+                      )}
+                      style={{
+                        background:
+                          theme === "dark"
+                            ? "rgba(254, 95, 47, 0.15)"
+                            : "rgba(255, 168, 50, 0.15)",
+                        border:
+                          theme === "dark"
+                            ? "1px solid rgba(254, 95, 47, 0.3)"
+                            : "1px solid rgba(255, 168, 50, 0.3)",
+                      }}
+                    >
+                      <option
+                        value="Homem"
+                        className={
+                          theme === "dark" ? "bg-slate-900" : "bg-white"
+                        }
+                      >
+                        Homem
+                      </option>
+                      <option
+                        value="Mulher"
+                        className={
+                          theme === "dark" ? "bg-slate-900" : "bg-white"
+                        }
+                      >
+                        Mulher
+                      </option>
+                    </select>
+                  </div>
+
                   <div className="space-y-1">
                     <label
                       className={cn(
@@ -2013,7 +2548,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                       ))}
                     </select>
                   </div>
-
                   <div className="space-y-1">
                     <label
                       className={cn(
@@ -2044,7 +2578,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                       }}
                     />
                   </div>
-
                   <div className="space-y-1">
                     <label
                       className={cn(
@@ -2075,7 +2608,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                       }}
                     />
                   </div>
-
                   <button
                     onClick={handleUpdateProfile}
                     className={cn(
@@ -2120,7 +2652,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                   >
                     Segurança
                   </h4>
-
                   <div className="space-y-3">
                     <div className="relative">
                       <input
@@ -2181,8 +2712,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
               </div>
             )}
           </div>
-
-          {/* === MODAL RESTAURADO (COM TODOS OS CAMPOS E ESTILO) === */}
+          {/* ... MODAIS ... */}
           {isSupportModalOpen && (
             <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4">
               <div
@@ -2226,8 +2756,20 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                       </select>
                     </div>
                     <div>
-                      <label className="text-xs font-bold text-white/70 uppercase mb-1 block">
-                        Motivo
+                      <label className="text-xs font-bold text-white/70 uppercase mb-1 flex items-center justify-between">
+                        Motivo{" "}
+                        <button
+                          type="button"
+                          onClick={() => handleVoiceInput("reason", setReason)}
+                          className={cn(
+                            "p-1 rounded-full transition-colors",
+                            isListening
+                              ? "bg-red-500 text-white animate-pulse"
+                              : "text-primary hover:bg-primary/20",
+                          )}
+                        >
+                          <Mic size={14} />
+                        </button>
                       </label>
                       <select
                         value={reason}
@@ -2246,8 +2788,22 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                       </select>
                     </div>
                     <div>
-                      <label className="text-xs font-bold text-white/70 uppercase mb-1 block">
-                        Detalhes
+                      <label className="text-xs font-bold text-white/70 uppercase mb-1 flex items-center justify-between">
+                        Detalhes{" "}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleVoiceInput("description", setDescription)
+                          }
+                          className={cn(
+                            "p-1 rounded-full transition-colors",
+                            isListening
+                              ? "bg-red-500 text-white animate-pulse"
+                              : "text-primary hover:bg-primary/20",
+                          )}
+                        >
+                          <Mic size={14} />
+                        </button>
                       </label>
                       <textarea
                         value={description}
@@ -2289,7 +2845,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     </div>
                     <div>
                       <label className="text-xs font-bold text-white/70 uppercase mb-1 flex justify-between">
-                        Regiões
+                        Regiões{" "}
                         <button
                           type="button"
                           onClick={() => handleAddField(setDeliveryRegions)}
@@ -2328,7 +2884,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     </div>
                     <div>
                       <label className="text-xs font-bold text-white/70 uppercase mb-1 flex justify-between">
-                        Veículos Necessários
+                        Veículos Necessários{" "}
                         <button
                           type="button"
                           onClick={() => handleAddField(setNeededVehicles)}
@@ -2377,93 +2933,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                         </div>
                       ))}
                     </div>
-
-                    <div>
-                      <label className="text-xs font-bold text-white/70 uppercase mb-1 block">
-                        Localização
-                      </label>
-                      <div className="flex gap-2">
-                        <input
-                          value={location}
-                          onChange={(e) => setLocation(e.target.value)}
-                          className="flex-1 p-3 bg-orange-500/20 backdrop-blur-xl border border-orange-500/30 rounded-xl text-sm text-white placeholder:text-white/50 focus:ring-2 focus:ring-[#FA4F26] outline-none shadow-lg shadow-black/10"
-                          placeholder="Link do Maps ou endereço"
-                          required
-                        />
-                        <button
-                          type="button"
-                          onClick={handleGetLocation}
-                          className="p-3 bg-blue-500/20 text-blue-300 rounded-xl border border-blue-400/30 hover:bg-blue-500/30 transition-colors shadow-lg shadow-black/10"
-                        >
-                          {isLocating ? (
-                            <Loading size="sm" variant="spinner" />
-                          ) : (
-                            <NavigationIcon size={20} />
-                          )}
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Upload de Foto da Carga */}
-                    <div>
-                      <label className="text-xs font-bold text-white/70 uppercase mb-2 block flex items-center gap-2">
-                        <ImageIcon size={16} className="text-primary" />
-                        Foto da Carga
-                        <span className="text-[10px] text-white/50 normal-case font-normal">
-                          (Opcional - Máx. 5MB)
-                        </span>
-                      </label>
-                      <div className="space-y-2">
-                        {cargoPhotoPreview ? (
-                          <div className="relative">
-                            <img
-                              src={cargoPhotoPreview}
-                              alt="Preview da carga"
-                              className="w-full h-48 object-cover rounded-xl border-2 border-primary/50 shadow-lg"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setCargoPhoto(null);
-                                setCargoPhotoPreview(null);
-                              }}
-                              className="absolute top-2 right-2 p-2 bg-red-500/90 hover:bg-red-600 text-white rounded-full shadow-lg transition-colors"
-                            >
-                              <XIcon size={16} />
-                            </button>
-                          </div>
-                        ) : (
-                          <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-primary/50 rounded-xl cursor-pointer bg-primary/10 hover:bg-primary/20 transition-colors group">
-                            <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                              <ImageIcon
-                                size={32}
-                                className="text-primary mb-2 group-hover:scale-110 transition-transform"
-                              />
-                              <p className="text-sm font-semibold text-white mb-1">
-                                Clique para adicionar foto
-                              </p>
-                              <p className="text-xs text-white/70">
-                                JPG, PNG ou GIF (máx. 5MB)
-                              </p>
-                            </div>
-                            <input
-                              type="file"
-                              accept="image/*"
-                              onChange={handleCargoPhotoChange}
-                              className="hidden"
-                              disabled={isUploadingPhoto}
-                            />
-                          </label>
-                        )}
-                        {isUploadingPhoto && (
-                          <div className="flex items-center justify-center gap-2 text-white/70 text-sm">
-                            <Loading size="sm" variant="spinner" />
-                            <span>Enviando foto...</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
                     {modalError && (
                       <p className="text-red-300 text-xs font-bold text-center bg-red-500/20 backdrop-blur-xl p-2 rounded-xl border border-red-400/30">
                         {modalError}
@@ -2490,29 +2959,39 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
           )}
 
           {isReauthModalOpen && (
-            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-6">
-              <div className="bg-white p-6 rounded-2xl w-full max-w-sm">
-                <h3 className="font-bold text-lg mb-4">Senha</h3>
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-slate-900/90 backdrop-blur-sm animate-in fade-in">
+              <div className="bg-slate-800/95 backdrop-blur-2xl rounded-3xl p-6 w-full max-w-sm shadow-2xl shadow-black/40 border border-orange-500/30">
+                <h3 className="font-bold text-lg mb-4 text-white">
+                  Confirme sua senha atual
+                </h3>
                 <input
                   type="password"
                   value={currentPassword}
                   onChange={(e) => setCurrentPassword(e.target.value)}
-                  className="w-full p-3 border rounded-xl"
+                  className="w-full p-3 bg-slate-700/90 backdrop-blur-xl border border-slate-600/50 rounded-xl mb-2 text-white placeholder:text-white/50 focus:ring-2 focus:ring-[#FA4F26] outline-none shadow-lg shadow-black/10"
                   placeholder="Senha atual"
                 />
-                <div className="flex gap-2 mt-4">
+                {reauthError && (
+                  <p className="text-red-300 text-xs mb-2">{reauthError}</p>
+                )}
+                <div className="flex gap-2">
                   <Button
-                    variant="ghost"
+                    variant="outline"
                     onClick={() => setIsReauthModalOpen(false)}
-                    className="flex-1"
+                    className="flex-1 border-slate-600/50 text-white hover:bg-slate-700/90 hover:text-white backdrop-blur-xl rounded-xl"
                   >
                     Cancelar
                   </Button>
                   <Button
                     onClick={handleReauthenticateAndChange}
-                    className="flex-1"
+                    disabled={isReauthenticating}
+                    className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl shadow-lg shadow-primary/30"
                   >
-                    Confirmar
+                    {isReauthenticating ? (
+                      <Loading size="sm" variant="spinner" />
+                    ) : (
+                      "Confirmar"
+                    )}
                   </Button>
                 </div>
               </div>
@@ -2520,13 +2999,14 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
           )}
 
           {showSuccessModal && (
-            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-6">
-              <div className="bg-white p-8 rounded-2xl text-center w-full max-w-sm">
-                <CheckCircle
-                  size={40}
-                  className="mx-auto text-green-500 mb-4"
-                />
-                <h2 className="text-2xl font-bold mb-2">Recebido!</h2>
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-slate-900/90 backdrop-blur-sm animate-in fade-in">
+              <div className="bg-slate-800/95 backdrop-blur-2xl rounded-3xl p-8 text-center max-w-sm w-full shadow-2xl shadow-black/40 border border-orange-500/30">
+                <div className="w-20 h-20 bg-green-500/20 text-green-300 rounded-full flex items-center justify-center mx-auto mb-4 border border-green-400/30 shadow-xl shadow-black/20">
+                  <CheckCircle size={40} />
+                </div>
+                <h2 className="text-2xl font-bold text-white mb-2">
+                  Recebido!
+                </h2>
                 <Button
                   onClick={() => setShowSuccessModal(false)}
                   className="w-full mt-4"
@@ -2537,13 +3017,10 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
             </div>
           )}
         </main>
-
-        {/* CHATBOT TARGET GHOST */}
         <div
           id="chatbot-tour-target"
           className="fixed bottom-0 right-0 w-20 h-20 pointer-events-none z-0"
         />
-
         <Chatbot />
       </div>
     </>
