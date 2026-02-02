@@ -1,48 +1,78 @@
 import React, { useState, useEffect } from "react";
 
-// MAPEAMENTO ATUALIZADO (Incluindo a pasta Galinha-bot)
+// MAPEAMENTO COMPLETO (Antigos + Novos)
 const MOODS = {
-  // Pasta: Shopito-Acenando
+  // --- ANTIGOS ---
   welcome: [
     "/mascots/Shopito-Acenando/wave-1.png",
     "/mascots/Shopito-Acenando/wave-2.png",
   ],
-
-  // Pasta: Shopito-Brabo
   angry: [
     "/mascots/Shopito-Brabo/angry-1.png",
     "/mascots/Shopito-Brabo/angry-2.png",
   ],
-
-  // Pasta: Shopito-Ok
   ok: ["/mascots/Shopito-Ok/ok-1.png", "/mascots/Shopito-Ok/ok-2.png"],
-
-  // Pasta: Shopito-Acenando (Festa)
-  celebrate: ["/mascots/Shopito-Acenando/wave-3.png"],
-
-  // Pasta: Shopito-Apontando
   "point-right": ["/mascots/Shopito-Apontando/point-right.png"],
   "point-left": ["/mascots/Shopito-Apontando/point-left.png"],
-
-  // --- AQUI ESTÁ A ALTERAÇÃO ---
-  // Pasta: Galinha-bot -> Arquivo: Galinha.png
   chicken: ["/mascots/Galinha-Bot/Galinha.png"],
+
+  // --- NOVOS (Adicionados Agora) ---
+  map: [
+    "/mascots/ShoppitoMapa/ShoppitoProf-1.png",
+    "/mascots/ShoppitoMapa/ShoppitoProf-2.png",
+    "/mascots/ShoppitoMapa/ShoppitoProf-3.png",
+  ],
+  ranking: [
+    "/mascots/ShoppitoRanking/ShopitoCorredor-1.png",
+    "/mascots/ShoppitoRanking/ShopitoCorredor-2.png",
+    "/mascots/ShoppitoRanking/ShopitoCorredor-3.png",
+  ],
+  // ✅ ALTERADO: Renomeei de 'celebrate' para 'finale' para bater com o Tour
+  finale: [
+    "/mascots/ShoppitoComemoracao/ShoppitoComemoracao-1.png",
+    "/mascots/ShoppitoComemoracao/ShoppitoComemoracao-2.png",
+    "/mascots/ShoppitoComemoracao/ShopitoComemoracao-3.png",
+  ],
 };
 
-export const ShopitoMascot = ({ mood = "welcome" }: { mood?: string }) => {
+interface ShopitoMascotProps {
+  mood?: string;
+  customImages?: string[];
+}
+
+export const ShopitoMascot = ({
+  mood = "welcome",
+  customImages,
+}: ShopitoMascotProps) => {
   const [frame, setFrame] = useState(0);
 
-  // Se o mood "chicken" for chamado, ele pega o array acima
-  const images = MOODS[mood as keyof typeof MOODS] || MOODS["welcome"];
+  // Lógica de Seleção:
+  // 1. Se vier customImages (passado pelo DriverInterface), usa.
+  // 2. Se não, tenta pegar do MOODS pelo nome (ex: 'finale', 'map').
+  // 3. Se não achar, usa 'welcome' como fallback.
+  // Conversão forçada de tipo para garantir que acesse o objeto MOODS
+  const images =
+    customImages && customImages.length > 0
+      ? customImages
+      : (MOODS as any)[mood] || MOODS["welcome"];
+
   const isAnimated = images.length > 1;
 
   useEffect(() => {
+    // Reseta o frame para 0 sempre que o conjunto de imagens mudar
+    setFrame(0);
+  }, [images]);
+
+  useEffect(() => {
     if (!isAnimated) return;
+
+    // Intervalo de animação (700ms)
     const interval = setInterval(() => {
-      setFrame((prev) => (prev === 0 ? 1 : 0));
+      setFrame((prev) => (prev + 1) % images.length);
     }, 700);
+
     return () => clearInterval(interval);
-  }, [mood, isAnimated]);
+  }, [isAnimated, images.length]);
 
   return (
     <div className="relative w-28 h-28 sm:w-40 sm:h-40 flex-shrink-0 z-50 mx-auto">
@@ -52,10 +82,8 @@ export const ShopitoMascot = ({ mood = "welcome" }: { mood?: string }) => {
         className="w-full h-full object-contain drop-shadow-2xl hover:scale-105 transition-transform duration-300"
         onError={(e) => {
           console.error(`ERRO: Imagem não encontrada: ${images[frame]}`);
-          // Se a galinha falhar, fallback para o Shopito acenando para não quebrar o layout
-          if (mood === "chicken") {
-            // e.currentTarget.src = '/mascots/Shopito-Acenando/wave-1.png'; // Descomente para ativar fallback
-          }
+          // Opcional: pode esconder a imagem quebrada
+          // e.currentTarget.style.display = "none";
         }}
       />
     </div>

@@ -633,11 +633,17 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
 
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
 
+  // ==========================================
+  // CONFIGURAÇÃO DO TOUR (CORRIGIDA - REMOVIDO ARRAYS DE IMAGENS)
+  // ==========================================
+  // ==========================================
+  // CONFIGURAÇÃO DO TOUR (CORRIGIDA - PASSO FINAL)
+  // ==========================================
   const tourSteps: Step[] = [
     {
       target: "body",
       content:
-        "Olá parceiro! Sou o Shopito. Vou te mostrar como faturar mais com a gente! 🚀",
+        "Olá parceiro! Sou o Shopito. Bem vindo a plataforma de apoio! 🚀",
       title: "Bem-vindo!",
       placement: "center",
       disableBeacon: true,
@@ -676,6 +682,28 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       placement: "auto",
       data: { mood: "ok" },
     },
+    // ✅ NOVO: ABA MAPA
+    {
+      target: ".tour-map-section",
+      content:
+        "Este é seu QG Estratégico! 🗺️ No Mapa de Calor, as áreas em laranja mostram onde a demanda está alta. Use essa visão para se posicionar melhor e pegar mais rotas!",
+      title: "Visão Estratégica",
+      placement: "auto",
+      data: {
+        mood: "map",
+      },
+    },
+    // ✅ NOVO: ABA RANKING
+    {
+      target: ".tour-ranking-section",
+      content:
+        "Quem são os lendas da estrada? 🏆 Aqui no Ranking, a gente celebra quem mais apoiou os colegas. Cada ajuda conta pontos. Bora buscar esse topo?",
+      title: "Galeria de Campeões",
+      placement: "auto",
+      data: {
+        mood: "ranking",
+      },
+    },
     {
       target: ".tour-profile-section",
       content:
@@ -697,13 +725,16 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
         spotlight: { backgroundColor: "transparent" },
       },
     },
+
     {
       target: "body",
       content:
         "Tudo pronto! Agradecimentos especiais a Bruno Aschwanden pela criação dos mascotes! 🎉",
       title: "Vamos Começar!",
       placement: "center",
-      data: { mood: "celebrate" },
+      data: {
+        mood: "finale", // <--- Comemoracao
+      },
     },
   ];
 
@@ -937,31 +968,47 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     }
   }, [driver, userId]);
 
+  // ==========================================
+  // CALLBACK DE NAVEGAÇÃO DO JOYRIDE (ATUALIZADO)
+  // ==========================================
   const handleJoyrideCallback = (data: CallBackProps) => {
     const { status, type, index, action } = data;
     const finishedStatuses: string[] = [STATUS.FINISHED, STATUS.SKIPPED];
+
     if (type === EVENTS.STEP_AFTER) {
+      // Avançar (Next)
       if (action === ACTIONS.NEXT) {
         const nextIndex = index + 1;
-        if ([1, 2].includes(nextIndex)) setActiveTab("availability");
+        if (nextIndex === 1) setActiveTab("availability");
+        if (nextIndex === 2) setActiveTab("availability");
         if (nextIndex === 3) setActiveTab("support");
         if (nextIndex === 4) setActiveTab("activeCalls");
-        if (nextIndex === 5) setActiveTab("profile");
-        setTimeout(() => setTourStepIndex(nextIndex), 400);
+        if (nextIndex === 5) setActiveTab("map"); // Abre a aba Mapa
+        if (nextIndex === 6) setActiveTab("ranking"); // Abre a aba Ranking
+        if (nextIndex === 7) setActiveTab("profile"); // Abre a aba Perfil
+        setTimeout(() => {
+          setTourStepIndex(nextIndex);
+        }, 400);
       }
+      // Voltar (Prev)
       if (action === ACTIONS.PREV) {
         const prevIndex = index - 1;
-        if ([1, 2].includes(prevIndex)) setActiveTab("availability");
+        if (prevIndex === 1) setActiveTab("availability");
+        if (prevIndex === 2) setActiveTab("availability");
         if (prevIndex === 3) setActiveTab("support");
         if (prevIndex === 4) setActiveTab("activeCalls");
-        if (prevIndex === 5) setActiveTab("profile");
+        if (prevIndex === 5) setActiveTab("map");
+        if (prevIndex === 6) setActiveTab("ranking");
+        if (prevIndex === 7) setActiveTab("profile");
         setTimeout(() => setTourStepIndex(prevIndex), 400);
       }
     }
+
     if (finishedStatuses.includes(status)) {
       setRunTour(false);
-      if (userId)
+      if (userId) {
         localStorage.setItem(`driver-tour-seen-v35-${userId}`, "true");
+      }
       if (status === STATUS.FINISHED) {
         setShowConfetti(true);
         setTimeout(() => setShowConfetti(false), 8000);
@@ -1743,7 +1790,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
               </div>
             )}
             {activeTab === "map" && (
-              <div className="h-[60vh] rounded-2xl overflow-hidden border border-orange-200/50 shadow-xl relative z-0">
+              <div className="tour-map-section h-[60vh] rounded-2xl overflow-hidden border border-orange-200/50 shadow-xl relative z-0">
                 <MapContainer
                   center={[-25.4284, -49.2733]}
                   zoom={12}
@@ -1806,7 +1853,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
 
             {/* CORREÇÃO DO CARD DE RANKING (SUBSTITUIÇÃO DE VÍDEO POR LOTTIE) */}
             {activeTab === "ranking" && (
-              <div className="space-y-6 pb-20">
+              <div className="tour-ranking-section space-y-6 pb-20">
                 <div className="flex justify-center items-end gap-4 pb-8 pt-4">
                   {rankedDrivers[1] && (
                     <div className="flex flex-col items-center">
