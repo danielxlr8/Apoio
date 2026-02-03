@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 
-// MAPEAMENTO COMPLETO (Antigos + Novos)
+// Imagens Tour
 const MOODS = {
   // --- ANTIGOS ---
   welcome: [
@@ -8,15 +8,15 @@ const MOODS = {
     "/mascots/Shopito-Acenando/wave-2.png",
   ],
   angry: [
-    "/mascots/Shopito-Brabo/angry-1.png",
-    "/mascots/Shopito-Brabo/angry-2.png",
+    "/mascots/Shopito-Brabo/Policial1.png",
+    "/mascots/Shopito-Brabo/Policial2.png",
+    "/mascots/Shopito-Brabo/Policial3.png",
   ],
   ok: ["/mascots/Shopito-Ok/ok-1.png", "/mascots/Shopito-Ok/ok-2.png"],
   "point-right": ["/mascots/Shopito-Apontando/point-right.png"],
   "point-left": ["/mascots/Shopito-Apontando/point-left.png"],
   chicken: ["/mascots/Galinha-Bot/Galinha.png"],
 
-  // --- NOVOS (Adicionados Agora) ---
   map: [
     "/mascots/ShoppitoMapa/ShoppitoProf-1.png",
     "/mascots/ShoppitoMapa/ShoppitoProf-2.png",
@@ -27,11 +27,26 @@ const MOODS = {
     "/mascots/ShoppitoRanking/ShopitoCorredor-2.png",
     "/mascots/ShoppitoRanking/ShopitoCorredor-3.png",
   ],
-  // ✅ ALTERADO: Renomeei de 'celebrate' para 'finale' para bater com o Tour
+
+  weather: [
+    "/mascots/Galinha-Bot/shoppitotempo1.png",
+    "/mascots/Galinha-Bot/shoppitotempo2.png",
+  ],
+
   finale: [
     "/mascots/ShoppitoComemoracao/ShoppitoComemoracao-1.png",
     "/mascots/ShoppitoComemoracao/ShoppitoComemoracao-2.png",
     "/mascots/ShoppitoComemoracao/ShopitoComemoracao-3.png",
+  ],
+
+  profile: [
+    "/mascots/Profile/profile1.png",
+    "/mascots/Profile/profile2.png",
+    "/mascots/Profile/profile3.png",
+    "/mascots/Profile/profile4.png",
+    "/mascots/Profile/profile5.png",
+    "/mascots/Profile/profile6.png",
+    "/mascots/Profile/profile7.png",
   ],
 };
 

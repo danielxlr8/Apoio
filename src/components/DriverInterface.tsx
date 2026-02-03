@@ -663,7 +663,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
         "Aqui você vê a previsão semanal. Se quiser detalhes, basta clicar no card para expandir.",
       title: "Previsão do Tempo",
       placement: "auto",
-      data: { mood: "point-right" },
+      data: { mood: "weather" },
       spotlightPadding: 10,
     },
     {
@@ -710,7 +710,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
         "Mantenha seus dados atualizados e sua senha segura aqui nesta aba.",
       title: "Seu Perfil",
       placement: "auto",
-      data: { mood: "point-right" },
+      data: { mood: "profile" },
     },
     {
       target: "#chatbot-tour-target",
