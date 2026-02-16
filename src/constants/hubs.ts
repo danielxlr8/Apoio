@@ -3,6 +3,7 @@ export const HUBS = [
   "LM Hub_PR_Maringa",
   "LM Hub_PR_Foz do Iguaçu",
   "LM Hub_PR_Cascavel",
+  "LM Hub_PR_Curitiba",
 ] as const;
 
 export type Hub = (typeof HUBS)[number];

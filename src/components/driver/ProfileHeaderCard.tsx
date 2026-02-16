@@ -9,6 +9,32 @@ import { ptBR } from "date-fns/locale";
 import { WeatherForecast } from "../WeatherForecast";
 import { getCityFromHub, normalizeHub } from "../../constants/hubs";
 
+const extractCityFromHub = (hubName: string): string => {
+  const hubToCityMap: Record<string, string> = {
+    SP: "São Paulo",
+    RJ: "Rio de Janeiro",
+    MG: "Belo Horizonte",
+    PR: "Curitiba",
+    BA: "Salvador",
+    CE: "Fortaleza",
+    DF: "Brasília",
+    RS: "Porto Alegre",
+    SC: "Florianópolis",
+  };
+
+  const stateMatch = hubName.match(/_([A-Z]{2})_/);
+  if (stateMatch && hubToCityMap[stateMatch[1]]) {
+    return hubToCityMap[stateMatch[1]];
+  }
+
+  const cityMatch = hubName.match(
+    /(?:Hub[_\s](?:[A-Z]{2}[_\s])?)?([A-ZÀ-Ú][a-zà-ú]+(?:\s[A-ZÀ-Ú][a-zà-ú]+)?)/,
+  );
+  if (cityMatch && cityMatch[1]) return cityMatch[1];
+
+  return "São Paulo";
+};
+
 interface ProfileHeaderCardProps {
   driver: Driver;
   onEditClick: () => void;

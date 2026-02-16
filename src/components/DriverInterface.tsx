@@ -1563,6 +1563,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
         description: informalDesc,
         urgency,
         location,
+        collectionLocation: location, // [CORREÇÃO] Campo reintegrado para satisfazer a validação
         status: "ABERTO",
         securityCode: generateSecurityCode(),
         vehicleType: vehicles.join(", "),
@@ -1851,7 +1852,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
               </div>
             )}
 
-            {/* CORREÇÃO DO CARD DE RANKING (SUBSTITUIÇÃO DE VÍDEO POR LOTTIE) */}
             {activeTab === "ranking" && (
               <div className="tour-ranking-section space-y-6 pb-20">
                 <div className="flex justify-center items-end gap-4 pb-8 pt-4">
@@ -2802,6 +2802,29 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                         ))}
                       </select>
                     </div>
+
+                    {/* [CORREÇÃO] REINSERÇÃO DO CAMPO DE LOCALIZAÇÃO */}
+                    <div>
+                      <label className="text-xs font-bold text-white/70 uppercase mb-1 flex items-center justify-between">
+                        Localização
+                        <button
+                          type="button"
+                          onClick={handleGetLocation}
+                          className="text-primary hover:text-primary/80 transition-colors flex items-center justify-center p-1 rounded-lg hover:bg-white/5"
+                          title="Usar localização atual"
+                        >
+                          <MapPin size={20} />
+                        </button>
+                      </label>
+                      <input
+                        value={location}
+                        onChange={(e) => setLocation(e.target.value)}
+                        className="w-full p-3 bg-slate-700/90 backdrop-blur-xl border border-slate-600/50 rounded-xl text-sm text-white placeholder:text-white/50 focus:ring-2 focus:ring-primary outline-none shadow-lg shadow-black/10"
+                        placeholder="Digite o endereço ou use o botão de GPS"
+                        required
+                      />
+                    </div>
+
                     <div>
                       <label className="text-xs font-bold text-white/70 uppercase mb-1 flex items-center justify-between">
                         Motivo{" "}
@@ -2998,46 +3021,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                       <Loading size="sm" variant="spinner" />
                     ) : (
                       "ENVIAR SOLICITAÇÃO"
-                    )}
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {isReauthModalOpen && (
-            <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-slate-900/90 backdrop-blur-sm animate-in fade-in">
-              <div className="bg-slate-800/95 backdrop-blur-2xl rounded-3xl p-6 w-full max-w-sm shadow-2xl shadow-black/40 border border-orange-500/30">
-                <h3 className="font-bold text-lg mb-4 text-white">
-                  Confirme sua senha atual
-                </h3>
-                <input
-                  type="password"
-                  value={currentPassword}
-                  onChange={(e) => setCurrentPassword(e.target.value)}
-                  className="w-full p-3 bg-slate-700/90 backdrop-blur-xl border border-slate-600/50 rounded-xl mb-2 text-white placeholder:text-white/50 focus:ring-2 focus:ring-[#FA4F26] outline-none shadow-lg shadow-black/10"
-                  placeholder="Senha atual"
-                />
-                {reauthError && (
-                  <p className="text-red-300 text-xs mb-2">{reauthError}</p>
-                )}
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => setIsReauthModalOpen(false)}
-                    className="flex-1 border-slate-600/50 text-white hover:bg-slate-700/90 hover:text-white backdrop-blur-xl rounded-xl"
-                  >
-                    Cancelar
-                  </Button>
-                  <Button
-                    onClick={handleReauthenticateAndChange}
-                    disabled={isReauthenticating}
-                    className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl shadow-lg shadow-primary/30"
-                  >
-                    {isReauthenticating ? (
-                      <Loading size="sm" variant="spinner" />
-                    ) : (
-                      "Confirmar"
                     )}
                   </Button>
                 </div>

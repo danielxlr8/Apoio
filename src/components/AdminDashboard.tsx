@@ -40,6 +40,7 @@ import {
   AlertOctagon,
   Sun,
   Moon,
+  HelpCircle, // Adicionado para o botão do Tour
 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -99,6 +100,9 @@ import { Palette } from "lucide-react";
 import { usePresence } from "../hooks/usePresence";
 import { OnlineUsersMonitor } from "./OnlineUsersMonitor";
 
+// --- TOUR IMPORT ---
+import { AdminTour } from "../AdminTour";
+
 // --- DND KIT IMPORTS ---
 import {
   DndContext,
@@ -123,7 +127,6 @@ interface SupportCall extends OriginalSupportCall {
   reason?: string;
   packageCount?: number;
   deliveryRegions?: string[];
-  prestador?: Driver; // Correção: Propriedade adicionada
 }
 
 type ColumnId =
@@ -581,31 +584,6 @@ const CallDetailsModal = ({
             </Button>
           </div>
 
-          {/* CORREÇÃO 6: Mostrar prestador quando chamado foi aceito */}
-          {call.prestador && (
-            <div className="flex items-center justify-between bg-green-50 dark:bg-green-900/10 p-3 rounded-lg border border-green-200 dark:border-green-900/30">
-              <div className="flex items-center gap-3">
-                <AvatarComponent user={call.prestador} />
-                <div>
-                  <p className="font-semibold text-foreground">
-                    {call.prestador.name}
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    Prestador (Quem Aceitou)
-                  </p>
-                </div>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-green-600 border-green-200 hover:bg-green-50"
-                onClick={() => handleContactDriver(call.prestador!.phone)}
-              >
-                <Phone size={16} className="mr-2" /> WhatsApp
-              </Button>
-            </div>
-          )}
-
           <p
             className={`font-bold text-sm uppercase ${getStatusColor(
               call.status,
@@ -908,8 +886,7 @@ const ApprovalCard = ({
   onDelete: (call: SupportCall) => void;
   drivers: Driver[];
 }) => {
-  const assignedDriver =
-    call.prestador || drivers.find((d) => d.uid === call.assignedTo);
+  const assignedDriver = drivers.find((d) => d.uid === call.assignedTo);
   const cleanDescription = (desc: string) => {
     if (desc.includes("Aqui está a descrição")) {
       const parts = desc.split('"');
@@ -1064,6 +1041,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onDeleteAllExcluded,
   onRefresh,
 }) => {
+  // --- STATE FOR TOUR ---
+  const [runTour, setRunTour] = useState(false);
+
+  // --- EFFECT FOR TOUR AUTO-START ---
+  useEffect(() => {
+    const hasSeenTour = localStorage.getItem("hasSeenAdminTour");
+    if (!hasSeenTour) {
+      setRunTour(true);
+      localStorage.setItem("hasSeenAdminTour", "true");
+    }
+  }, []);
+
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [adminView, setAdminView] = useState<AdminView>("kanban");
@@ -1394,12 +1383,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // --- CONFIGURAÇÃO DE COLUNAS (Drag & Drop) ---
   const [columns, setColumns] = useState<ColumnConfig[]>([
-    {
-      id: "abertos",
-      label: "Abertos",
-      isVisible: true,
-      colorClass: "#F59E0B",
-    },
+    { id: "abertos", label: "Abertos", isVisible: true, colorClass: "#F59E0B" },
     {
       id: "em_andamento",
       label: "Em Andamento",
@@ -1662,19 +1646,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     showNotification("success", "Restaurado", "Chamado voltou para Abertos.");
   };
 
-  const filteredCalls = useMemo(() => {
-    // CORREÇÃO: Filtrar chamados pelo Hub do admin
-    const profileHub = adminProfile.hub;
-    if (
-      !profileHub ||
-      profileHub === "Todos" ||
-      profileHub === "Todos os Hubs"
-    ) {
-      return calls;
-    }
-    return calls.filter((call) => call.hub === profileHub);
-  }, [calls, adminProfile.hub]);
-
+  const filteredCalls = useMemo(() => calls, [calls]);
   const activeCalls = useMemo(
     () =>
       filteredCalls.filter(
@@ -1840,7 +1812,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   );
 
   const filterControls = (
-    <div className="flex flex-wrap gap-1">
+    <div id="tour-filter-urgency" className="flex flex-wrap gap-1">
       {(["TODOS", "URGENTE", "ALTA", "MEDIA", "BAIXA"] as const).map(
         (level) => (
           <Button
@@ -1987,7 +1959,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           backgroundAttachment: theme === "light" ? "fixed" : undefined,
         }}
       >
+        {/* --- TOUR COMPONENT RENDERED HERE --- */}
+        <AdminTour run={runTour} setRun={setRunTour} />
+
         <aside
+          id="tour-sidebar"
           className={cn(
             "sticky top-0 h-screen flex-shrink-0 p-4 flex flex-col gap-6 transition-all duration-300 ease-in-out backdrop-blur-xl border-r border-border",
             isSidebarCollapsed ? "w-20" : "w-64",
@@ -2058,6 +2034,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </span>
             </Button>
             <Button
+              id="tour-nav-history"
               variant={adminView === "history" ? "secondary" : "ghost"}
               className={cn(
                 "gap-2 justify-start",
@@ -2071,7 +2048,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </span>
             </Button>
           </nav>
-          <div className="mt-auto">
+          <div className="mt-auto flex flex-col gap-2">
+            {/* --- BOTÃO PARA REINICIAR O TOUR MANUALMENTE --- */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setRunTour(true)}
+              className={cn(
+                "justify-start text-muted-foreground",
+                isSidebarCollapsed && "justify-center",
+              )}
+            >
+              <HelpCircle size={18} className="mr-2" />
+              <span className={cn(isSidebarCollapsed && "hidden")}>
+                Ajuda / Tour
+              </span>
+            </Button>
+
             <Button
               variant={adminView === "profile" ? "secondary" : "ghost"}
               className={cn(
@@ -2107,7 +2100,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               {adminView === "kanban" && (
                 <Popover>
                   <PopoverTrigger asChild>
-                    <Button variant="outline" size="sm" className="gap-2">
+                    <Button
+                      id="tour-config-panel"
+                      variant="outline"
+                      size="sm"
+                      className="gap-2"
+                    >
                       <Settings2 size={16} /> Configurar Painel
                     </Button>
                   </PopoverTrigger>
@@ -2139,7 +2137,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </Popover>
               )}
             </div>
-            <div className="flex items-center gap-2">
+            <div id="tour-header-actions" className="flex items-center gap-2">
               {onRefresh && (
                 <button
                   onClick={() => {
@@ -2170,6 +2168,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           {/* Card de informações do admin */}
           <div className="px-4 sm:px-6 pt-4">
             <div
+              id="tour-admin-card"
               className="w-full p-4 md:p-6 rounded-xl border border-orange-900/30 relative z-10"
               style={{
                 backgroundColor: cardColors.mainColor,
@@ -2400,7 +2399,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <div className="tab-content-enter">
               {adminView === "kanban" && (
                 <div className="flex-grow flex flex-col space-y-4 h-[calc(100vh-140px)]">
-                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                  <div
+                    id="tour-summary-cards"
+                    className="grid grid-cols-2 md:grid-cols-5 gap-4"
+                  >
                     <SummaryCard
                       title="Abertos"
                       value={openCalls.length}
@@ -2442,6 +2444,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <OnlineUsersMonitor theme={theme} />
 
                   <ResizablePanelGroup
+                    id="tour-kanban-board"
                     direction="horizontal"
                     className="flex-grow rounded-xl min-h-[500px]"
                     style={{
