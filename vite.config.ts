@@ -17,6 +17,6 @@ export default defineConfig({
     port: 3000,
     strictPort: true, // garante que o Vite rode na porta 3000
     cors: true, // libera requisições externas
-    allowedHosts: ["odoriferously-nonstringent-vergie.ngrok-free.dev"], // libera hosts externos
+    allowedHosts: ["localhost"], // libera hosts externos
   },
 });

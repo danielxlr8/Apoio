@@ -53,3 +53,4 @@ Thumbs.db
 # MongoDB
 # ============================
 dump/
+service-account.json

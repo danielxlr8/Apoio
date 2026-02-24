@@ -114,6 +114,14 @@ import { toast as sonnerToast } from "sonner";
 import { Loading, LoadingOverlay } from "./ui/loading";
 import { usePresence } from "../hooks/usePresence";
 
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "./ui/tooltip";
+import { Alert, AlertDescription } from "./ui/alert";
+
 // Correção Leaflet
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -633,6 +641,10 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
 
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
 
+  const isProfileEditingLocked = useMemo(() => {
+    return localDriverStatus !== "INDISPONIVEL";
+  }, [localDriverStatus]);
+
   // ==========================================
   // CONFIGURAÇÃO DO TOUR (CORRIGIDA - REMOVIDO ARRAYS DE IMAGENS)
   // ==========================================
@@ -838,18 +850,19 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     return active;
   }, [allMyCalls, historyFilter, userId, globalHubFilter]);
 
+  // src/components/DriverInterface.tsx
+
   const filteredOpenCalls = useMemo(
     () =>
       openSupportCalls.filter(
         (c) =>
-          c.solicitante.id !== userId &&
+          c.solicitante.id !== userId && // <--- CORREÇÃO: Filtro explícito de segurança
           (globalHubFilter === "Todos os Hubs" || c.hub === globalHubFilter) &&
           (!routeIdSearch ||
             c.routeId?.toLowerCase().includes(routeIdSearch.toLowerCase())),
       ),
-    [openSupportCalls, routeIdSearch, globalHubFilter, userId],
+    [openSupportCalls, routeIdSearch, globalHubFilter, userId], // <--- Adicionado userId nas dependências
   );
-
   const rankedDrivers = useMemo(() => {
     return [...allDrivers]
       .filter((d) => (d as any).completedSupports > 0)
@@ -1258,6 +1271,8 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
           phone: driver.phone,
         },
       } as any);
+      // REGRA 3B: Marca motorista prestador como INDISPONIVEL ao aceitar chamado
+      await updateDriver(shopeeId, { status: "INDISPONIVEL" });
       await updateDriver(shopeeId, { status: "EM_ROTA" });
     } catch {
       setLocalDriverStatus(driver.status || "INDISPONIVEL");
@@ -1585,6 +1600,11 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
         },
       };
       await addNewCall(newCall);
+      // REGRA 3A: Marca motorista como INDISPONIVEL ao enviar solicitação
+      if (shopeeId) {
+        await updateDriver(shopeeId, { status: "INDISPONIVEL" });
+        setLocalDriverStatus("INDISPONIVEL");
+      }
       setIsSupportModalOpen(false);
       setShowSuccessModal(true);
       setDeliveryRegions([""]);
@@ -1738,41 +1758,69 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                 : "bg-slate-900/40 backdrop-blur-xl border-orange-500/30",
             )}
           >
-            {TABS.map((tab) => {
-              const isDisabled = !isProfileComplete && tab.id !== "profile";
-              return (
-                <button
-                  key={tab.id}
-                  disabled={isDisabled}
-                  onClick={() => !isDisabled && setActiveTab(tab.id as TabId)}
-                  className={cn(
-                    "flex-1 flex flex-col items-center py-3 px-2 rounded-xl text-[10px] sm:text-xs uppercase font-bold tracking-wide min-w-[60px] sm:min-w-[80px] transition-all duration-300 ease-in-out",
-                    activeTab === tab.id
-                      ? "text-white bg-primary shadow-lg scale-105"
-                      : theme === "light"
-                        ? "text-slate-700 hover:text-slate-900 hover:bg-orange-50/80"
-                        : "text-slate-300 hover:text-white hover:bg-orange-500/20",
-                    isDisabled && "opacity-40 grayscale cursor-not-allowed",
-                  )}
-                >
-                  <div className="transition-transform duration-300">
-                    {isDisabled ? (
-                      <Lock size={20} className="text-slate-400 mb-1" />
-                    ) : (
-                      React.cloneElement(tab.icon, {
-                        size: 20,
-                        className: cn(
-                          "mb-1 transition-all duration-300",
-                          activeTab === tab.id && "scale-110",
-                        ),
-                      })
+            <TooltipProvider delayDuration={100}>
+              {TABS.map((tab) => {
+                const isDisabled = !isProfileComplete && tab.id !== "profile";
+                return (
+                  <Tooltip key={tab.id}>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          if (isDisabled) {
+                            e.preventDefault();
+                            return;
+                          }
+                          setActiveTab(tab.id as TabId);
+                        }}
+                        className={cn(
+                          "flex-1 flex flex-col items-center py-3 px-2 rounded-xl text-[10px] sm:text-xs uppercase font-bold tracking-wide min-w-[60px] sm:min-w-[80px] transition-all duration-300 ease-in-out",
+                          activeTab === tab.id
+                            ? "text-white bg-primary shadow-lg scale-105"
+                            : theme === "light"
+                              ? "text-slate-700 hover:text-slate-900 hover:bg-orange-50/80"
+                              : "text-slate-300 hover:text-white hover:bg-orange-500/20",
+                          isDisabled &&
+                            "opacity-40 grayscale cursor-not-allowed",
+                        )}
+                      >
+                        <div className="transition-transform duration-300">
+                          {isDisabled ? (
+                            <Lock size={20} className="text-slate-400 mb-1" />
+                          ) : (
+                            React.cloneElement(tab.icon, {
+                              size: 20,
+                              className: cn(
+                                "mb-1 transition-all duration-300",
+                                activeTab === tab.id && "scale-110",
+                              ),
+                            })
+                          )}
+                        </div>
+                        <span className="hidden sm:inline">{tab.label}</span>
+                        <span className="sm:hidden">
+                          {tab.label.split(" ")[0]}
+                        </span>
+                      </button>
+                    </TooltipTrigger>
+                    {isDisabled && (
+                      <TooltipContent
+                        side="top"
+                        className="max-w-xs text-center z-[10000] bg-slate-800 text-white border border-orange-500/50 shadow-xl"
+                      >
+                        <p className="font-bold text-[#EE4D2D] mb-1">
+                          ACESSO RESTRITO 🔒
+                        </p>
+                        <p className="text-xs">
+                          Preencha Nome, Telefone, Hub e Veículo na aba Perfil
+                          para liberar o acesso ao sistema.
+                        </p>
+                      </TooltipContent>
                     )}
-                  </div>
-                  <span className="hidden sm:inline">{tab.label}</span>
-                  <span className="sm:hidden">{tab.label.split(" ")[0]}</span>
-                </button>
-              );
-            })}
+                  </Tooltip>
+                );
+              })}
+            </TooltipProvider>
           </div>
 
           <div className="min-h-[400px]">
@@ -2300,6 +2348,19 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
 
             {activeTab === "profile" && (
               <div className="tab-content-enter space-y-6 pb-10 tour-profile-section">
+                {isProfileEditingLocked && (
+                  <Alert className="bg-orange-500/10 border-[#EE4D2D]/30 shadow-md flex items-center gap-3">
+                    <AlertTriangle className="h-5 w-5 text-[#EE4D2D] shrink-0" />
+                    <AlertDescription className="text-sm font-medium text-foreground dark:text-white leading-relaxed">
+                      <span className="text-[#EE4D2D] font-bold block sm:inline">
+                        Edição Travada:{" "}
+                      </span>
+                      Fique INDISPONÍVEL na aba Status para conseguir alterar
+                      seus dados.
+                    </AlertDescription>
+                  </Alert>
+                )}
+
                 {/* Configurações */}
                 <section
                   className={cn(
@@ -2336,7 +2397,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                           isMuted
                             ? theme === "dark"
                               ? "text-slate-400 bg-slate-800/80 border border-slate-600/30"
-                              : "text-slate-500 bg-slate-100 border border-slate-300"
+                              : "text-slate-50 bg-slate-100 border border-slate-300"
                             : theme === "dark"
                               ? "text-emerald-300 bg-emerald-500/20 border border-emerald-400/30"
                               : "text-emerald-600 bg-emerald-50 border border-emerald-300",
@@ -2381,10 +2442,11 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                 {/* Meus Dados */}
                 <section
                   className={cn(
-                    "rounded-[1.5rem] p-5 space-y-4 border",
+                    "rounded-[1.5rem] p-5 space-y-4 border transition-all",
                     theme === "dark"
                       ? "bg-slate-900/40 border-orange-500/30 backdrop-blur-sm"
                       : "bg-white/80 border-orange-200/50",
+                    isProfileEditingLocked && "opacity-60 pointer-events-none",
                   )}
                   style={
                     theme === "dark"
@@ -2456,6 +2518,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     <div className="relative">
                       <input
                         type="text"
+                        disabled={isProfileEditingLocked}
                         value={hubSearch}
                         onChange={(e) => {
                           setHubSearch(e.target.value);
@@ -2463,7 +2526,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                         }}
                         onFocus={() => setIsHubDropdownOpen(true)}
                         className={cn(
-                          "w-full p-4 rounded-xl text-sm font-medium border focus:ring-2 focus:ring-orange-500/50 outline-none transition-all",
+                          "w-full p-4 rounded-xl text-sm font-medium border focus:ring-2 focus:ring-orange-500/50 outline-none transition-all disabled:opacity-50",
                           theme === "dark"
                             ? "bg-orange-500/20 border-orange-500/30 text-white placeholder:text-slate-400"
                             : "bg-orange-50/80 border-orange-200/50 text-slate-800 placeholder:text-slate-500",
@@ -2520,9 +2583,10 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     </label>
                     <select
                       value={gender}
+                      disabled={isProfileEditingLocked}
                       onChange={(e) => setGender(e.target.value)}
                       className={cn(
-                        "w-full p-4 rounded-xl text-sm font-medium capitalize focus:ring-2 focus:ring-orange-500/50 outline-none transition-all appearance-none cursor-pointer",
+                        "w-full p-4 rounded-xl text-sm font-medium capitalize focus:ring-2 focus:ring-orange-500/50 outline-none transition-all appearance-none cursor-pointer disabled:opacity-50",
                         theme === "dark" ? "text-white" : "text-slate-800",
                       )}
                       style={{
@@ -2566,9 +2630,10 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     </label>
                     <select
                       value={vehicleType}
+                      disabled={isProfileEditingLocked}
                       onChange={(e) => setVehicleType(e.target.value)}
                       className={cn(
-                        "w-full p-4 rounded-xl text-sm font-medium capitalize focus:ring-2 focus:ring-orange-500/50 outline-none transition-all appearance-none cursor-pointer",
+                        "w-full p-4 rounded-xl text-sm font-medium capitalize focus:ring-2 focus:ring-orange-500/50 outline-none transition-all appearance-none cursor-pointer disabled:opacity-50",
                         theme === "dark" ? "text-white" : "text-slate-800",
                       )}
                       style={{
@@ -2606,9 +2671,10 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     </label>
                     <input
                       value={name}
+                      disabled={isProfileEditingLocked}
                       onChange={(e) => setName(e.target.value)}
                       className={cn(
-                        "w-full p-4 rounded-xl text-sm focus:ring-2 focus:ring-orange-500/50 outline-none transition-all",
+                        "w-full p-4 rounded-xl text-sm focus:ring-2 focus:ring-orange-500/50 outline-none transition-all disabled:opacity-50",
                         theme === "dark"
                           ? "text-white placeholder:text-slate-400"
                           : "text-slate-800 placeholder:text-slate-500",
@@ -2636,9 +2702,10 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     </label>
                     <input
                       value={formatPhoneNumber(phone)}
+                      disabled={isProfileEditingLocked}
                       onChange={(e) => setPhone(e.target.value)}
                       className={cn(
-                        "w-full p-4 rounded-xl text-sm focus:ring-2 focus:ring-orange-500/50 outline-none transition-all",
+                        "w-full p-4 rounded-xl text-sm focus:ring-2 focus:ring-orange-500/50 outline-none transition-all disabled:opacity-50",
                         theme === "dark"
                           ? "text-white placeholder:text-slate-400"
                           : "text-slate-800 placeholder:text-slate-500",
@@ -2657,8 +2724,9 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                   </div>
                   <button
                     onClick={handleUpdateProfile}
+                    disabled={isProfileEditingLocked}
                     className={cn(
-                      "w-full py-4 mt-2 rounded-xl font-bold text-sm transition-all hover:opacity-90",
+                      "w-full py-4 mt-2 rounded-xl font-bold text-sm transition-all hover:opacity-90 disabled:opacity-50",
                       theme === "dark" ? "text-white" : "text-white",
                     )}
                     style={{
@@ -2674,10 +2742,11 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                 {/* Segurança */}
                 <section
                   className={cn(
-                    "rounded-[1.5rem] p-5 space-y-4 border",
+                    "rounded-[1.5rem] p-5 space-y-4 border transition-all",
                     theme === "dark"
                       ? "bg-slate-900/40 border-orange-500/30 backdrop-blur-sm"
                       : "bg-white/80 border-orange-200/50",
+                    isProfileEditingLocked && "opacity-60 pointer-events-none",
                   )}
                   style={
                     theme === "dark"
@@ -2704,10 +2773,11 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                       <input
                         type={showPassword ? "text" : "password"}
                         value={newPassword}
+                        disabled={isProfileEditingLocked}
                         onChange={(e) => setNewPassword(e.target.value)}
                         placeholder="Nova Senha"
                         className={cn(
-                          "w-full p-4 rounded-xl text-sm border pr-12",
+                          "w-full p-4 rounded-xl text-sm border pr-12 disabled:opacity-50",
                           theme === "dark"
                             ? "bg-slate-700 border-slate-600 text-white placeholder:text-white/50"
                             : "bg-white border-slate-300 text-slate-900",
@@ -2733,10 +2803,11 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     <input
                       type={showPassword ? "text" : "password"}
                       value={confirmPassword}
+                      disabled={isProfileEditingLocked}
                       onChange={(e) => setConfirmPassword(e.target.value)}
                       placeholder="Confirmar Nova Senha"
                       className={cn(
-                        "w-full p-4 rounded-xl text-sm border",
+                        "w-full p-4 rounded-xl text-sm border disabled:opacity-50",
                         theme === "dark"
                           ? "bg-slate-700 border-slate-600 text-white placeholder:text-white/50"
                           : "bg-white border-slate-300 text-slate-900",
@@ -2744,7 +2815,11 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     />
                     <button
                       onClick={handleChangePassword}
-                      disabled={!newPassword || !confirmPassword}
+                      disabled={
+                        !newPassword ||
+                        !confirmPassword ||
+                        isProfileEditingLocked
+                      }
                       className={cn(
                         "w-full py-4 rounded-xl text-sm font-medium border transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
                         theme === "dark"
@@ -2803,7 +2878,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                       </select>
                     </div>
 
-                    {/* [CORREÇÃO] REINSERÇÃO DO CAMPO DE LOCALIZAÇÃO */}
                     <div>
                       <label className="text-xs font-bold text-white/70 uppercase mb-1 flex items-center justify-between">
                         Localização

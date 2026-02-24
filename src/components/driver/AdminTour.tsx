@@ -7,14 +7,14 @@ import Joyride, {
   Step,
   TooltipRenderProps,
 } from "react-joyride";
-import { Button } from "../../ui/button"; // Seus componentes existentes
+import { Button } from "../ui/button"; // Seus componentes existentes
 import {
   Card,
   CardContent,
   CardFooter,
   CardHeader,
   CardTitle,
-} from "../../ui/card"; // Seus componentes existentes
+} from "../ui/card"; // Seus componentes existentes
 import { X, ChevronRight, ChevronLeft, MapPin } from "lucide-react";
 
 interface AdminTourProps {

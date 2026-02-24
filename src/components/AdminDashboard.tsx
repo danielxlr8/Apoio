@@ -40,7 +40,21 @@ import {
   AlertOctagon,
   Sun,
   Moon,
-  HelpCircle, // Adicionado para o botão do Tour
+  HelpCircle,
+  KeyRound,
+  Info,
+  Map as MapIcon,
+  UserCircle,
+  Camera,
+  Save,
+  Mail,
+  Linkedin,
+  MessageCircle,
+  Briefcase,
+  FileText,
+  Home,
+  Hash,
+  Palette,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -55,17 +69,7 @@ import {
 import { db, auth, storage } from "../firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
-import {
-  Camera,
-  Save,
-  Mail,
-  Linkedin,
-  MessageCircle,
-  Briefcase,
-  FileText,
-  Home,
-  Hash,
-} from "lucide-react";
+
 import { Loading } from "./ui/loading";
 import {
   AvatarComponent,
@@ -96,14 +100,11 @@ import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { Switch } from "./ui/switch";
 import { WeatherForecast } from "./WeatherForecast";
 import { HUBS, getCityFromHub } from "../constants/hubs";
-import { Palette } from "lucide-react";
 import { usePresence } from "../hooks/usePresence";
 import { OnlineUsersMonitor } from "./OnlineUsersMonitor";
 
-// --- TOUR IMPORT ---
-import { AdminTour } from "../AdminTour";
+import { AdminTour } from "./driver/AdminTour";
 
-// --- DND KIT IMPORTS ---
 import {
   DndContext,
   closestCenter,
@@ -122,11 +123,11 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
-// --- TIPOS ---
 interface SupportCall extends OriginalSupportCall {
   reason?: string;
   packageCount?: number;
   deliveryRegions?: string[];
+  securityCode?: string;
 }
 
 type ColumnId =
@@ -144,7 +145,19 @@ interface ColumnConfig {
   colorClass: string;
 }
 
-// --- ITEM SORTABLE PARA O MENU ---
+type AdminView = "kanban" | "excluded" | "history" | "profile";
+
+interface AdminDashboardProps {
+  calls: SupportCall[];
+  drivers: Driver[];
+  updateCall: (id: string, updates: Partial<Omit<SupportCall, "id">>) => void;
+  onDeleteCall: (id: string) => void;
+  onDeletePermanently: (id: string) => void;
+  onDeleteAllExcluded: () => void;
+  onRefresh?: () => void;
+  isGod?: boolean;
+}
+
 const SortableItem = ({
   id,
   label,
@@ -185,7 +198,6 @@ const SortableItem = ({
   );
 };
 
-// --- FUNÇÕES AUXILIARES ---
 const showNotification = (
   type: "success" | "error" | "warning" | "info",
   title: string,
@@ -238,7 +250,13 @@ const handleContactDriver = (phone: string | undefined) => {
   }
 };
 
-// --- COMPONENTES VISUAIS ---
+const getDriverId = (drivers: Driver[], uid: string) => {
+  const driver = drivers.find((d) => d.uid === uid);
+  if (driver) {
+    return driver.uid.slice(-4).toUpperCase();
+  }
+  return uid.slice(-4).toUpperCase();
+};
 
 const EnhancedDriverCard = ({
   driver,
@@ -270,13 +288,18 @@ const EnhancedDriverCard = ({
         <AvatarComponent user={driver} />
       </div>
       <div className="flex-1 min-w-0">
-        <p
-          className="font-bold text-white cursor-pointer truncate text-sm"
-          onClick={() => onInfoClick(driver)}
-          title={driver.name}
-        >
-          {driver.name}
-        </p>
+        <div className="flex items-center gap-2">
+          <p
+            className="font-bold text-white cursor-pointer truncate text-sm"
+            onClick={() => onInfoClick(driver)}
+            title={driver.name}
+          >
+            {driver.name}
+          </p>
+          <span className="text-[10px] font-mono text-emerald-400 bg-emerald-400/10 px-1 rounded border border-emerald-400/20">
+            {driver.uid.slice(-4).toUpperCase()}
+          </span>
+        </div>
         <div className="text-xs text-slate-400 flex flex-col sm:flex-row sm:items-center sm:gap-3 mt-1.5">
           <div
             className="flex items-center gap-1.5 truncate"
@@ -512,10 +535,72 @@ const ConfirmationModal = ({
   );
 };
 
+const DescriptionParser = ({ description }: { description: string }) => {
+  const regex =
+    /MOTIVO:\s*(.*?)\.\s*DETALHES:\s*(.*?)\.\s*Hub:\s*(.*?)\.\s*Loc:\s*(.*?)\.\s*Qtd:\s*(.*?)\.\s*Regiões:\s*(.*?)\.\s*Veículos:\s*(.*?)\./i;
+  const match = description.match(regex);
+
+  if (!match) {
+    const cleanText = description
+      .replace("Aqui está a descrição", "")
+      .replace(/"/g, "");
+    return (
+      <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+        {cleanText}
+      </p>
+    );
+  }
+
+  const [_, motivo, detalhes, _hub, _loc, _qtd, regioes, veiculos] = match;
+  const isVolumoso = description.includes("VOLUMOSO");
+
+  return (
+    <div className="space-y-3 mt-2">
+      <div className="bg-muted/30 p-3 rounded-lg border border-border/50">
+        <h4 className="text-xs font-bold uppercase text-muted-foreground mb-2 flex items-center gap-2">
+          <Info size={14} /> Detalhes da Ocorrência
+        </h4>
+        <div className="space-y-2 text-sm">
+          <div className="flex flex-col">
+            <span className="font-semibold text-foreground">Motivo:</span>
+            <span className="text-muted-foreground">{motivo}</span>
+          </div>
+          <div className="flex flex-col">
+            <span className="font-semibold text-foreground">Descrição:</span>
+            <span className="text-muted-foreground">{detalhes}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div className="bg-blue-50 dark:bg-blue-900/10 p-2 rounded border border-blue-100 dark:border-blue-900/30">
+          <span className="text-xs font-bold text-blue-600 dark:text-blue-400 block mb-0.5 uppercase">
+            Veículos
+          </span>
+          <span className="text-xs text-foreground capitalize">{veiculos}</span>
+        </div>
+        <div className="bg-orange-50 dark:bg-orange-900/10 p-2 rounded border border-orange-100 dark:border-orange-900/30">
+          <span className="text-xs font-bold text-orange-600 dark:text-orange-400 block mb-0.5 uppercase">
+            Regiões
+          </span>
+          <span className="text-xs text-foreground">{regioes}</span>
+        </div>
+      </div>
+
+      {isVolumoso && (
+        <div className="bg-red-50 dark:bg-red-900/10 text-red-600 dark:text-red-400 text-xs font-bold p-2 rounded text-center border border-red-200 dark:border-red-800 uppercase flex items-center justify-center gap-2">
+          <Weight size={14} /> Carga Volumosa
+        </div>
+      )}
+    </div>
+  );
+};
+
 const CallDetailsModal = ({
   call,
   onClose,
   onUpdateStatus,
+  drivers,
 }: {
   call: SupportCall | null;
   onClose: () => void;
@@ -523,6 +608,7 @@ const CallDetailsModal = ({
     id: string,
     updates: Partial<Omit<SupportCall, "id">>,
   ) => void;
+  drivers?: Driver[];
 }) => {
   if (!call) return null;
   const getStatusColor = (status: CallStatus) => {
@@ -541,13 +627,10 @@ const CallDetailsModal = ({
         return "text-muted-foreground";
     }
   };
-  const cleanDescription = (desc: string) => {
-    if (desc.includes("Aqui está a descrição")) {
-      const parts = desc.split('"');
-      return parts[1] || desc;
-    }
-    return desc;
-  };
+
+  const driverId = drivers
+    ? getDriverId(drivers, call.solicitante.id)
+    : call.solicitante.id.slice(-4).toUpperCase();
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -558,169 +641,166 @@ const CallDetailsModal = ({
         >
           <X size={20} />
         </button>
-        <CardHeader>
+        <CardHeader className="pb-2">
           <CardTitle className="text-xl font-bold text-foreground">
             Detalhes do Chamado
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between bg-muted/20 p-3 rounded-xl border border-border/50">
             <div className="flex items-center gap-3">
               <AvatarComponent user={call.solicitante} />
               <div>
-                <p className="font-semibold text-foreground">
+                <p className="font-semibold text-foreground flex items-center gap-2">
                   {call.solicitante.name}
                 </p>
-                <p className="text-sm text-muted-foreground">Solicitante</p>
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <span>Solicitante</span>
+                  <div className="flex items-center gap-1 font-mono bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-xs text-primary border border-border/50">
+                    <UserCircle size={10} />
+                    {driverId}
+                  </div>
+                </div>
               </div>
             </div>
             <Button
               variant="outline"
               size="sm"
-              className="text-green-600 border-green-200 hover:bg-green-50"
+              className="text-green-600 border-green-200 hover:bg-green-50 h-8 text-xs"
               onClick={() => handleContactDriver(call.solicitante.phone)}
             >
-              <Phone size={16} className="mr-2" /> WhatsApp
+              <Phone size={14} className="mr-1.5" /> WhatsApp
             </Button>
           </div>
 
-          <p
-            className={`font-bold text-sm uppercase ${getStatusColor(
-              call.status,
-            )}`}
-          >
-            {call.status.replace("_", " ")}
-          </p>
+          <div className="flex items-center justify-between">
+            <p
+              className={`font-bold text-sm uppercase ${getStatusColor(call.status)}`}
+            >
+              {call.status.replace("_", " ")}
+            </p>
+            <div className="text-xs text-muted-foreground flex items-center gap-1">
+              <Clock size={12} />
+              {call.timestamp
+                ? format(
+                    call.timestamp instanceof Timestamp
+                      ? call.timestamp.toDate()
+                      : new Date((call.timestamp as any).seconds * 1000),
+                    "dd/MM HH:mm",
+                  )
+                : "--:--"}
+            </div>
+          </div>
+
+          {call.securityCode && (
+            <div className="flex items-center justify-between p-3 bg-purple-50 dark:bg-purple-900/20 rounded-xl border border-purple-200 dark:border-purple-800">
+              <div className="flex items-center gap-2 text-purple-700 dark:text-purple-300">
+                <KeyRound size={18} />
+                <span className="text-xs font-bold uppercase">
+                  PIN de Validação
+                </span>
+              </div>
+              <span className="text-xl font-mono font-bold tracking-widest text-purple-700 dark:text-purple-300 bg-white/50 dark:bg-black/20 px-3 py-1 rounded shadow-sm">
+                {call.securityCode}
+              </span>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3 text-sm">
-            {call.reason && (
-              <div className="col-span-2 bg-red-50 dark:bg-red-900/10 p-2 rounded border border-red-100 dark:border-red-900/30">
-                <span className="font-semibold text-red-600 dark:text-red-400">
-                  Motivo:
-                </span>{" "}
-                {call.reason}
-              </div>
-            )}
-            <div className="flex items-center gap-2">
-              <Package size={16} className="text-primary" />
-              <span>{call.packageCount || "N/A"} Pacotes</span>
+            <div className="flex items-center gap-2 p-2 rounded bg-muted/30">
+              <Package size={16} className="text-primary shrink-0" />
+              <span className="truncate">
+                {call.packageCount || "N/A"} Pacotes
+              </span>
             </div>
-            <div className="flex items-center gap-2">
-              <Truck size={16} className="text-primary" />
-              <span className="capitalize">{call.vehicleType || "N/A"}</span>
+            <div className="flex items-center gap-2 p-2 rounded bg-muted/30">
+              <MapPin size={16} className="text-primary shrink-0" />
+              <span className="truncate">{call.hub || "Hub N/A"}</span>
             </div>
-            {call.isBulky && (
-              <div className="flex items-center gap-2 text-orange-600">
-                <Weight size={16} />
-                <span>Volumoso</span>
-              </div>
-            )}
+          </div>
 
-            <div className="col-span-2">
-              <a
-                href={call.location}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-2 text-blue-600 hover:underline hover:text-blue-800 transition-colors p-2 rounded bg-blue-50 dark:bg-blue-900/10"
-              >
-                <MapPin size={16} className="shrink-0" />
+          <div className="w-full">
+            <a
+              href={call.location}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-between gap-2 text-blue-600 hover:text-blue-700 hover:underline transition-colors p-2.5 rounded-lg bg-blue-50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-900/20 text-xs sm:text-sm"
+            >
+              <div className="flex items-center gap-2 truncate">
+                <MapIcon size={16} className="shrink-0" />
                 <span className="truncate">{call.location}</span>
-                <ExternalLink size={12} className="ml-auto opacity-50" />
-              </a>
-            </div>
-
-            {call.deliveryRegions && call.deliveryRegions.length > 0 && (
-              <div className="col-span-2">
-                <span className="font-semibold text-muted-foreground block mb-1">
-                  Regiões:
-                </span>
-                <div className="flex flex-wrap gap-1">
-                  {call.deliveryRegions.map((region, idx) => (
-                    <Badge key={idx} variant="secondary" className="text-xs">
-                      {region}
-                    </Badge>
-                  ))}
-                </div>
               </div>
-            )}
+              <ExternalLink size={12} className="shrink-0 opacity-50" />
+            </a>
           </div>
 
-          <div className="font-sans text-base font-medium text-foreground bg-muted/50 p-3 rounded-md whitespace-pre-wrap">
-            {cleanDescription(call.description)}
-          </div>
+          <DescriptionParser description={call.description} />
         </CardContent>
-        <CardFooter className="mt-2 pt-4 border-t border-border flex flex-wrap justify-between items-center gap-4">
-          <p className="text-sm text-muted-foreground">Mover para:</p>
-          <div className="flex gap-2 flex-wrap justify-end">
-            {call.status === "EM ANDAMENTO" && (
-              <>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onUpdateStatus(call.id, { status: "ABERTO" })}
-                >
-                  <ArrowLeft size={16} className="mr-1.5" /> Aberto
-                </Button>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  className="bg-red-100 text-red-700 hover:bg-red-200 border-red-200"
-                  onClick={() =>
-                    onUpdateStatus(call.id, { status: "DEVOLUCAO" })
-                  }
-                >
-                  <AlertOctagon size={16} className="mr-1.5" /> Devolução
-                </Button>
-                <Button
-                  variant="default"
-                  size="sm"
-                  className="bg-purple-600 hover:bg-purple-700"
-                  onClick={() =>
-                    onUpdateStatus(call.id, { status: "AGUARDANDO_APROVACAO" })
-                  }
-                >
-                  Aguard. Aprovação <ArrowRight size={16} className="ml-1.5" />
-                </Button>
-              </>
-            )}
-
-            {call.status === "DEVOLUCAO" && (
-              <Button
-                variant="default"
-                size="sm"
-                className="bg-blue-600 hover:bg-blue-700"
-                onClick={() =>
-                  onUpdateStatus(call.id, { status: "EM ANDAMENTO" })
-                }
-              >
-                <RotateCcw size={16} className="mr-1.5" /> Retomar Rota
-              </Button>
-            )}
-
-            {call.status === "CONCLUIDO" && (
+        <CardFooter className="mt-2 pt-4 border-t border-border flex flex-wrap justify-end gap-2 bg-muted/10">
+          {call.status === "EM ANDAMENTO" && (
+            <>
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() =>
-                  onUpdateStatus(call.id, { status: "EM ANDAMENTO" })
-                }
+                onClick={() => onUpdateStatus(call.id, { status: "ABERTO" })}
               >
-                <ArrowLeft size={16} className="mr-1.5" /> Em Andamento
+                <ArrowLeft size={16} className="mr-1.5" /> Aberto
               </Button>
-            )}
-            {call.status === "ABERTO" && (
+              <Button
+                variant="destructive"
+                size="sm"
+                className="bg-red-100 text-red-700 hover:bg-red-200 border-red-200"
+                onClick={() => onUpdateStatus(call.id, { status: "DEVOLUCAO" })}
+              >
+                <AlertOctagon size={16} className="mr-1.5" /> Devolução
+              </Button>
               <Button
                 variant="default"
                 size="sm"
-                className="bg-blue-600 hover:bg-blue-700"
+                className="bg-purple-600 hover:bg-purple-700"
                 onClick={() =>
-                  onUpdateStatus(call.id, { status: "EM ANDAMENTO" })
+                  onUpdateStatus(call.id, { status: "AGUARDANDO_APROVACAO" })
                 }
               >
-                Em Andamento <ArrowRight size={16} className="ml-1.5" />
+                Aguard. Aprovação <ArrowRight size={16} className="ml-1.5" />
               </Button>
-            )}
-          </div>
+            </>
+          )}
+          {call.status === "DEVOLUCAO" && (
+            <Button
+              variant="default"
+              size="sm"
+              className="bg-blue-600 hover:bg-blue-700"
+              onClick={() =>
+                onUpdateStatus(call.id, { status: "EM ANDAMENTO" })
+              }
+            >
+              <RotateCcw size={16} className="mr-1.5" /> Retomar Rota
+            </Button>
+          )}
+          {call.status === "CONCLUIDO" && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                onUpdateStatus(call.id, { status: "EM ANDAMENTO" })
+              }
+            >
+              <ArrowLeft size={16} className="mr-1.5" /> Em Andamento
+            </Button>
+          )}
+          {call.status === "ABERTO" && (
+            <Button
+              variant="default"
+              size="sm"
+              className="bg-blue-600 hover:bg-blue-700"
+              onClick={() =>
+                onUpdateStatus(call.id, { status: "EM ANDAMENTO" })
+              }
+            >
+              Em Andamento <ArrowRight size={16} className="ml-1.5" />
+            </Button>
+          )}
         </CardFooter>
       </Card>
     </div>
@@ -731,10 +811,12 @@ const CallCard = ({
   call,
   onDelete,
   onClick,
+  drivers,
 }: {
   call: SupportCall;
   onDelete: (call: SupportCall) => void;
   onClick: (call: SupportCall) => void;
+  drivers?: Driver[];
 }) => {
   const formatTime = (timestamp: any): string => {
     if (!timestamp) return "--:--";
@@ -751,6 +833,10 @@ const CallCard = ({
   };
 
   const timeString = formatTime(call.timestamp);
+
+  const driverId = drivers
+    ? getDriverId(drivers, call.solicitante.id)
+    : call.solicitante.id.slice(-4).toUpperCase();
 
   const urgencyColor =
     {
@@ -782,10 +868,15 @@ const CallCard = ({
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
-        <div className="w-1.5 h-1.5 rounded-full bg-primary/50"></div>
-        <span className="text-sm font-semibold text-foreground truncate leading-none">
-          {call.solicitante.name}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 overflow-hidden">
+          <div className="w-1.5 h-1.5 rounded-full bg-primary/50 shrink-0"></div>
+          <span className="text-sm font-semibold text-foreground truncate leading-none">
+            {call.solicitante.name}
+          </span>
+        </div>
+        <span className="text-[10px] font-mono text-muted-foreground bg-muted px-1 rounded shrink-0 border border-border/50">
+          {driverId}
         </span>
       </div>
 
@@ -887,13 +978,10 @@ const ApprovalCard = ({
   drivers: Driver[];
 }) => {
   const assignedDriver = drivers.find((d) => d.uid === call.assignedTo);
-  const cleanDescription = (desc: string) => {
-    if (desc.includes("Aqui está a descrição")) {
-      const parts = desc.split('"');
-      return parts[1] || desc;
-    }
-    return desc;
-  };
+  const driverId = getDriverId(drivers, call.solicitante.id);
+  const providerId = assignedDriver
+    ? getDriverId(drivers, assignedDriver.uid)
+    : null;
 
   return (
     <Card className="overflow-hidden shadow-lg border-l-8 border-purple-500 rounded-xl bg-card">
@@ -905,7 +993,12 @@ const ApprovalCard = ({
               <p className="font-bold text-foreground">
                 {call.solicitante.name}
               </p>
-              <p className="text-sm text-muted-foreground">Solicitante</p>
+              <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                <span>Solicitante</span>
+                <span className="text-[10px] font-mono bg-background/50 px-1 rounded border border-border/50">
+                  {driverId}
+                </span>
+              </div>
             </div>
           </div>
           <div className="flex flex-col items-end gap-2">
@@ -924,17 +1017,19 @@ const ApprovalCard = ({
           </div>
         </div>
         {assignedDriver && (
-          <div className="flex items-center justify-between gap-3 text-sm text-muted-foreground pl-1 pt-3">
+          <div className="flex items-center justify-between gap-3 text-sm text-muted-foreground pl-1 pt-3 border-t border-purple-200/20 mt-2">
             <div className="flex items-center gap-3">
-              <ArrowRight size={16} className="text-muted-foreground/50" />
               <AvatarComponent user={assignedDriver} />
               <div>
                 <p className="font-semibold text-foreground">
                   {assignedDriver.name}
                 </p>
-                <p className="text-xs text-muted-foreground">
-                  Prestador do Apoio
-                </p>
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <span>Prestador</span>
+                  <span className="text-[10px] font-mono bg-background/50 px-1 rounded border border-border/50">
+                    {providerId}
+                  </span>
+                </div>
               </div>
             </div>
             <Button
@@ -953,31 +1048,21 @@ const ApprovalCard = ({
       </CardHeader>
 
       <CardContent className="p-4 space-y-3">
-        {call.reason && (
-          <Badge
-            variant="outline"
-            className="w-full justify-center border-red-200 text-red-700 bg-red-50 dark:bg-red-900/20 dark:text-red-300 dark:border-red-900/50"
-          >
-            {call.reason}
-          </Badge>
+        {call.securityCode && (
+          <div className="flex items-center justify-between p-2 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800">
+            <div className="flex items-center gap-2 text-purple-700 dark:text-purple-300">
+              <KeyRound size={16} />
+              <span className="text-xs font-bold uppercase">
+                PIN de Validação
+              </span>
+            </div>
+            <span className="text-lg font-mono font-bold tracking-widest text-purple-700 dark:text-purple-300">
+              {call.securityCode}
+            </span>
+          </div>
         )}
-        <div className="grid grid-cols-2 gap-2 text-sm text-muted-foreground">
-          <div className="flex items-center gap-2">
-            <Package size={14} className="text-primary" />
-            <span>{call.packageCount || "N/A"}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Truck size={14} className="text-primary" />
-            <span className="capitalize">{call.vehicleType || "N/A"}</span>
-          </div>
-          <div className="col-span-2 flex items-center gap-2">
-            <Building size={14} className="text-primary" />
-            <span>{call.hub || "N/A"}</span>
-          </div>
-        </div>
-        <p className="font-sans text-sm font-medium text-foreground bg-muted/50 p-3 rounded-md whitespace-pre-wrap">
-          {cleanDescription(call.description)}
-        </p>
+
+        <DescriptionParser description={call.description} />
       </CardContent>
 
       <CardFooter className="mt-2 pt-3 border-t bg-muted/30 p-4 flex justify-end gap-3">
@@ -1011,20 +1096,6 @@ const ApprovalCard = ({
   );
 };
 
-// --- COMPONENTE PRINCIPAL DO PAINEL ---
-
-interface AdminDashboardProps {
-  calls: SupportCall[];
-  drivers: Driver[];
-  updateCall: (id: string, updates: Partial<Omit<SupportCall, "id">>) => void;
-  onDeleteCall: (id: string) => void;
-  onDeletePermanently: (id: string) => void;
-  onDeleteAllExcluded: () => void;
-  onRefresh?: () => void;
-}
-
-type AdminView = "kanban" | "excluded" | "history" | "profile";
-
 const viewTitles: Record<string, string> = {
   kanban: "Acompanhamento Operacional",
   excluded: "Solicitações Excluídas (Lixeira)",
@@ -1040,11 +1111,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onDeletePermanently,
   onDeleteAllExcluded,
   onRefresh,
+  isGod = false,
 }) => {
-  // --- STATE FOR TOUR ---
   const [runTour, setRunTour] = useState(false);
 
-  // --- EFFECT FOR TOUR AUTO-START ---
   useEffect(() => {
     const hasSeenTour = localStorage.getItem("hasSeenAdminTour");
     if (!hasSeenTour) {
@@ -1057,8 +1127,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [isMuted, setIsMuted] = useState(false);
   const [adminView, setAdminView] = useState<AdminView>("kanban");
   const [currentDateTime, setCurrentDateTime] = useState<Date>(new Date());
+  const [selectedCall, setSelectedCall] = useState<SupportCall | null>(null);
 
-  // Estados do perfil do admin
   const [adminProfile, setAdminProfile] = useState({
     name: "",
     email: "",
@@ -1077,13 +1147,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     hub: "",
   });
 
-  // Estados para customização do card
   const [cardColors, setCardColors] = useState({
     mainColor: "#000000",
     gradientColor: "#1a1a1a",
   });
 
-  // Estado para previsão do tempo
   const [selectedWeatherDay, setSelectedWeatherDay] = useState<string | null>(
     null,
   );
@@ -1100,9 +1168,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     return "light";
   });
 
-  // ========================================
-  // SISTEMA DE PRESENÇA - Rastreamento de admins online
-  // ========================================
   const currentUser = auth.currentUser;
   usePresence(
     currentUser?.uid || null,
@@ -1113,13 +1178,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           email: currentUser.email || "",
         }
       : null,
-    true, // Sempre ativo para admins
+    true,
   );
 
-  // Atualizar data/hora do Brasil
   useEffect(() => {
     const updateDateTime = () => {
-      // Fuso horário do Brasil (America/Sao_Paulo)
       const brazilTime = new Date(
         new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }),
       );
@@ -1132,7 +1195,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     return () => clearInterval(interval);
   }, []);
 
-  // Sincronizar tema com o sistema
   useEffect(() => {
     const root = window.document.documentElement;
     root.classList.remove("light", "dark");
@@ -1143,15 +1205,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const toggleTheme = () => {
     const newTheme = theme === "light" ? "dark" : "light";
     setTheme(newTheme);
-
-    // Aplicar tema imediatamente para animação
     const root = window.document.documentElement;
     root.classList.remove("light", "dark");
     root.classList.add(newTheme);
     localStorage.setItem("theme", newTheme);
   };
 
-  // Carregar perfil do admin
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (!user) {
@@ -1193,7 +1252,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           });
           setAvatarPreview(data.avatar || null);
 
-          // Carregar cores do card
           if (data.cardMainColor && data.cardGradientColor) {
             setCardColors({
               mainColor: data.cardMainColor,
@@ -1201,7 +1259,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             });
           }
         } else {
-          // Criar perfil inicial se não existir
           const name = user.displayName || user.email?.split("@")[0] || "Admin";
           const initials = name
             .split(" ")
@@ -1252,7 +1309,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     return () => unsubscribe();
   }, []);
 
-  // Upload de avatar
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1260,13 +1316,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const user = auth.currentUser;
     if (!user) return;
 
-    // Validar tipo de arquivo
     if (!file.type.startsWith("image/")) {
       sonnerToast.error("Por favor, selecione uma imagem");
       return;
     }
 
-    // Validar tamanho (max 5MB)
     if (file.size > 5 * 1024 * 1024) {
       sonnerToast.error("A imagem deve ter no máximo 5MB");
       return;
@@ -1284,7 +1338,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setAdminProfile((prev) => ({ ...prev, avatar: photoURL }));
       setAvatarPreview(photoURL);
 
-      // Salvar no Firestore
       const adminDocRef = doc(db, "admins_pre_aprovados", user.uid);
       await updateDoc(adminDocRef, { avatar: photoURL });
 
@@ -1297,7 +1350,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  // Salvar perfil
   const handleSaveProfile = async () => {
     const user = auth.currentUser;
     if (!user) return;
@@ -1355,7 +1407,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [confirmationType, setConfirmationType] = useState<
     "soft-delete" | "permanent-delete" | "clear-all" | null
   >(null);
-  const [selectedCall, setSelectedCall] = useState<SupportCall | null>(null);
 
   const [excludedNameFilter, setExcludedNameFilter] = useState("");
   const [excludedHubFilter, setExcludedHubFilter] = useState("Todos os Hubs");
@@ -1381,7 +1432,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const notifiedCallIds = useRef(new Set<string>());
   const prevCallsRef = useRef<SupportCall[]>([]);
 
-  // --- CONFIGURAÇÃO DE COLUNAS (Drag & Drop) ---
   const [columns, setColumns] = useState<ColumnConfig[]>([
     { id: "abertos", label: "Abertos", isVisible: true, colorClass: "#F59E0B" },
     {
@@ -1623,22 +1673,36 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setConfirmationType(null);
   };
 
-  const confirmAction = () => {
-    if (confirmationType === "soft-delete" && callToConfirm) {
-      onDeleteCall(callToConfirm.id);
-      showNotification("success", "Lixeira", "Chamado movido para lixeira.");
-    } else if (confirmationType === "permanent-delete" && callToConfirm) {
-      onDeletePermanently(callToConfirm.id);
-      showNotification(
-        "success",
-        "Excluído",
-        "Chamado excluído permanentemente.",
-      );
-    } else if (confirmationType === "clear-all") {
-      onDeleteAllExcluded();
-      showNotification("success", "Limpo", "Lixeira esvaziada.");
+  const confirmAction = async () => {
+    try {
+      if (confirmationType === "soft-delete" && callToConfirm) {
+        await onDeleteCall(callToConfirm.id);
+        showNotification("success", "Lixeira", "Chamado movido para lixeira.");
+      } else if (confirmationType === "permanent-delete" && callToConfirm) {
+        await onDeletePermanently(callToConfirm.id);
+        showNotification(
+          "success",
+          "Excluído",
+          "Chamado excluído permanentemente.",
+        );
+      } else if (confirmationType === "clear-all") {
+        if (isGod) {
+          await onDeleteAllExcluded();
+          showNotification("success", "Limpo", "Lixeira esvaziada.");
+        }
+      }
+    } catch (error) {
+      if (isGod) {
+        console.error("Log Técnico SuperAdmin:", error);
+        showNotification(
+          "error",
+          "Erro de Sincronia",
+          "Falha na comunicação com o MongoDB/Firebase.",
+        );
+      }
+    } finally {
+      closeModal();
     }
-    closeModal();
   };
 
   const handleRestore = (callId: string) => {
@@ -1773,7 +1837,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       });
   }, [filteredCalls, appliedHistoryFilters]);
 
-  // Listas de Dropdowns
   const allHubs = useMemo(
     () =>
       [
@@ -1941,6 +2004,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             call={call}
             onDelete={handleDeleteClick}
             onClick={setSelectedCall}
+            drivers={drivers}
           />
         ))}
       </KanbanColumn>
@@ -1959,7 +2023,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           backgroundAttachment: theme === "light" ? "fixed" : undefined,
         }}
       >
-        {/* --- TOUR COMPONENT RENDERED HERE --- */}
         <AdminTour run={runTour} setRun={setRunTour} />
 
         <aside
@@ -2049,7 +2112,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </Button>
           </nav>
           <div className="mt-auto flex flex-col gap-2">
-            {/* --- BOTÃO PARA REINICIAR O TOUR MANUALMENTE --- */}
             <Button
               variant="ghost"
               size="sm"
@@ -2165,7 +2227,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </header>
 
-          {/* Card de informações do admin */}
           <div className="px-4 sm:px-6 pt-4">
             <div
               id="tour-admin-card"
@@ -2175,7 +2236,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 background: `linear-gradient(to bottom, ${cardColors.mainColor} 0%, ${cardColors.gradientColor} 100%)`,
               }}
             >
-              {/* Paleta de cores no canto superior direito */}
               {adminView === "kanban" && (
                 <Popover>
                   <PopoverTrigger asChild>
@@ -2267,92 +2327,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           />
                         </div>
                       </div>
-                      <div className="space-y-2">
-                        <label className="text-xs font-medium text-slate-600">
-                          Cores Pré-definidas
-                        </label>
-                        <div className="grid grid-cols-4 gap-2">
-                          {[
-                            {
-                              name: "Preto",
-                              main: "#000000",
-                              gradient: "#1a1a1a",
-                            },
-                            {
-                              name: "Azul Escuro",
-                              main: "#1e3a8a",
-                              gradient: "#1e40af",
-                            },
-                            {
-                              name: "Verde Escuro",
-                              main: "#166534",
-                              gradient: "#15803d",
-                            },
-                            {
-                              name: "Roxo Escuro",
-                              main: "#581c87",
-                              gradient: "#6b21a8",
-                            },
-                            {
-                              name: "Vermelho Escuro",
-                              main: "#991b1b",
-                              gradient: "#b91c1c",
-                            },
-                            {
-                              name: "Laranja Escuro",
-                              main: "#9a3412",
-                              gradient: "#c2410c",
-                            },
-                            {
-                              name: "Cinza Escuro",
-                              main: "#374151",
-                              gradient: "#4b5563",
-                            },
-                            {
-                              name: "Azul Marinho",
-                              main: "#0f172a",
-                              gradient: "#1e293b",
-                            },
-                          ].map((preset) => (
-                            <button
-                              key={preset.name}
-                              onClick={() => {
-                                setCardColors({
-                                  mainColor: preset.main,
-                                  gradientColor: preset.gradient,
-                                });
-                                const user = auth.currentUser;
-                                if (user) {
-                                  updateDoc(
-                                    doc(db, "admins_pre_aprovados", user.uid),
-                                    {
-                                      cardMainColor: preset.main,
-                                      cardGradientColor: preset.gradient,
-                                    },
-                                  );
-                                }
-                              }}
-                              className="flex flex-col items-center gap-1 p-2 rounded border hover:bg-slate-50 transition-colors"
-                            >
-                              <div
-                                className="w-full h-8 rounded"
-                                style={{
-                                  background: `linear-gradient(to bottom, ${preset.main} 0%, ${preset.gradient} 100%)`,
-                                }}
-                              />
-                              <span className="text-xs text-slate-600">
-                                {preset.name}
-                              </span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
                     </div>
                   </PopoverContent>
                 </Popover>
               )}
 
-              {/* Data e hora do Brasil no topo */}
               <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-4 pb-4 border-b border-orange-900/20">
                 <div className="flex flex-col gap-1 flex-1">
                   <div className="flex items-center gap-2 text-white">
@@ -2366,16 +2345,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       locale: ptBR,
                     })}
                   </div>
-                  {/* Nome do Admin abaixo da data */}
                   <div className="mt-2 ml-8">
                     <h3 className="text-lg md:text-xl font-bold text-white">
                       {adminProfile.name || "Admin Shopee"}
+                      {isGod && (
+                        <span className="ml-2 text-[10px] bg-orange-500/20 text-orange-400 px-1.5 py-0.5 rounded font-mono border border-orange-500/30">
+                          [GOD]
+                        </span>
+                      )}
                     </h3>
                   </div>
                 </div>
               </div>
 
-              {/* Previsão do tempo - ocupando toda a largura */}
               {adminView === "kanban" && (
                 <div className="w-full">
                   <WeatherForecast
@@ -2440,7 +2422,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     />
                   </div>
 
-                  {/* Monitor de Usuários Online */}
                   <OnlineUsersMonitor theme={theme} />
 
                   <ResizablePanelGroup
@@ -2504,7 +2485,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <h2 className="text-xl font-bold text-foreground">
                       Solicitações Excluídas
                     </h2>
-                    {excludedCalls.length > 0 && (
+                    {isGod && excludedCalls.length > 0 && (
                       <Button
                         onClick={handleClearAllClick}
                         variant="destructive"
@@ -2512,6 +2493,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         className="rounded-lg"
                       >
                         <Trash2 size={14} className="mr-1.5" /> Limpar Tudo
+                        Global
                       </Button>
                     )}
                   </div>
@@ -2552,18 +2534,63 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             key={call.id}
                             className="p-4 shadow-md bg-card flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
                           >
-                            <div className="flex-grow">
-                              <p className="font-semibold text-foreground">
-                                {call.solicitante.name}
-                              </p>
-                              <p className="text-sm text-muted-foreground truncate">
-                                {call.description}
-                              </p>
-                              {call.deletedAt && (
-                                <p className="text-xs text-muted-foreground/70 mt-1">
-                                  Excluído em: {formattedDeletedDate}
+                            <div className="flex-grow min-w-0">
+                              <div className="flex items-center gap-2 mb-2">
+                                <User
+                                  size={14}
+                                  className="text-orange-400 shrink-0"
+                                />
+                                <p className="font-semibold text-foreground truncate">
+                                  {call.solicitante.name}
                                 </p>
-                              )}
+                              </div>
+                              <div className="mt-2 border-t border-white/5 pt-2">
+                                {isGod ? (
+                                  <div className="grid grid-cols-1 gap-1 text-[11px] leading-relaxed">
+                                    <div className="flex items-center gap-1.5 text-gray-400">
+                                      <span className="h-1 w-1 rounded-full bg-orange-500" />
+                                      <span className="font-semibold text-gray-300">
+                                        Hub:
+                                      </span>{" "}
+                                      {call.hub}
+                                    </div>
+                                    <div className="flex items-center gap-1.5 text-gray-400">
+                                      <span className="h-1 w-1 rounded-full bg-orange-500" />
+                                      <span className="font-semibold text-gray-300">
+                                        Veículo:
+                                      </span>{" "}
+                                      {call.vehicleType}
+                                    </div>
+                                    <div className="flex items-center gap-1.5 text-gray-400">
+                                      <span className="h-1 w-1 rounded-full bg-orange-500" />
+                                      <span className="font-semibold text-gray-300">
+                                        Carga:
+                                      </span>{" "}
+                                      {call.packageCount} volumes
+                                    </div>
+                                    {call.reason && (
+                                      <div className="flex items-center gap-1.5 text-gray-400">
+                                        <span className="h-1 w-1 rounded-full bg-orange-500" />
+                                        <span className="font-semibold text-gray-300">
+                                          Motivo:
+                                        </span>{" "}
+                                        {call.reason}
+                                      </div>
+                                    )}
+                                    <div className="flex items-center gap-1.5 text-gray-400 mt-1 opacity-50">
+                                      <Clock size={10} />
+                                      <span>
+                                        Excluído em: {formattedDeletedDate}
+                                      </span>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <p className="text-xs text-gray-500 italic line-clamp-2">
+                                    {call.description ||
+                                      "Sem descrição disponível"}
+                                  </p>
+                                )}
+                              </div>
                             </div>
                             <div className="flex items-center gap-2 flex-shrink-0">
                               <Button
@@ -2747,9 +2774,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               {adminView === "profile" && (
                 <div className="tab-content-enter space-y-6 w-full relative z-10">
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    {/* Coluna Esquerda - Foto e Informações Básicas */}
                     <div className="lg:col-span-1 space-y-6">
-                      {/* Foto de Perfil */}
                       <Card
                         className={cn(
                           "shadow-lg border",
@@ -2771,81 +2796,57 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </CardHeader>
                         <CardContent className="flex flex-col items-center gap-4">
                           {isLoadingProfile ? (
-                            <div className="flex items-center justify-center py-12">
-                              <Loading size="lg" variant="spinner" />
-                            </div>
+                            <Loading size="lg" variant="spinner" />
                           ) : (
-                            <>
-                              <div className="relative group">
-                                <div
-                                  className={cn(
-                                    "w-40 h-40 rounded-full overflow-hidden border-4 flex items-center justify-center",
-                                    theme === "dark"
-                                      ? "border-orange-500/30 bg-slate-700/50"
-                                      : "border-orange-200/50 bg-orange-50/80",
-                                  )}
-                                >
-                                  {avatarPreview || adminProfile.avatar ? (
-                                    <img
-                                      src={avatarPreview || adminProfile.avatar}
-                                      alt={adminProfile.name}
-                                      className="w-full h-full object-cover"
-                                    />
-                                  ) : (
-                                    <span
-                                      className={cn(
-                                        "text-5xl font-bold",
-                                        theme === "dark"
-                                          ? "text-white"
-                                          : "text-slate-800",
-                                      )}
-                                    >
-                                      {adminProfile.initials}
-                                    </span>
-                                  )}
-                                  {isUploadingAvatar && (
-                                    <div className="absolute inset-0 bg-slate-900/60 flex items-center justify-center">
-                                      <Loading
-                                        size="md"
-                                        variant="spinner"
-                                        className="text-white"
-                                      />
-                                    </div>
-                                  )}
-                                </div>
-                                <label
-                                  className="absolute bottom-0 right-0 p-3 rounded-full cursor-pointer transition-all hover:scale-110 shadow-lg"
-                                  style={{
-                                    background:
-                                      "linear-gradient(135deg, #f97316 0%, #ea580c 100%)",
-                                  }}
-                                >
-                                  <Camera size={22} className="text-white" />
-                                  <input
-                                    type="file"
-                                    accept="image/*"
-                                    onChange={handleAvatarUpload}
-                                    className="hidden"
-                                    disabled={isUploadingAvatar}
-                                  />
-                                </label>
-                              </div>
-                              <p
+                            <div className="relative group">
+                              <div
                                 className={cn(
-                                  "text-sm text-center",
+                                  "w-40 h-40 rounded-full overflow-hidden border-4 flex items-center justify-center",
                                   theme === "dark"
-                                    ? "text-slate-300"
-                                    : "text-slate-600",
+                                    ? "border-orange-500/30 bg-slate-700/50"
+                                    : "border-orange-200/50 bg-orange-50/80",
                                 )}
                               >
-                                Clique na câmera para alterar a foto
-                              </p>
-                            </>
+                                {avatarPreview || adminProfile.avatar ? (
+                                  <img
+                                    src={avatarPreview || adminProfile.avatar}
+                                    alt="Avatar"
+                                    className="w-full h-full object-cover"
+                                  />
+                                ) : (
+                                  <span
+                                    className={cn(
+                                      "text-5xl font-bold",
+                                      theme === "dark"
+                                        ? "text-white"
+                                        : "text-slate-800",
+                                    )}
+                                  >
+                                    {adminProfile.initials}
+                                  </span>
+                                )}
+                              </div>
+                              <label
+                                className="absolute bottom-0 right-0 p-3 rounded-full cursor-pointer transition-all hover:scale-110 shadow-lg"
+                                style={{
+                                  background:
+                                    "linear-gradient(135deg, #f97316 0%, #ea580c 100%)",
+                                }}
+                              >
+                                <Camera size={22} className="text-white" />
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={handleAvatarUpload}
+                                  className="hidden"
+                                  disabled={isUploadingAvatar}
+                                />
+                              </label>
+                            </div>
                           )}
                         </CardContent>
                       </Card>
 
-                      {/* Configurações do Painel */}
                       <Card
                         className={cn(
                           "shadow-lg border",
@@ -2862,7 +2863,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 : "text-slate-800",
                             )}
                           >
-                            Configurações do Painel
+                            Configurações
                           </CardTitle>
                         </CardHeader>
                         <CardContent className="space-y-4">
@@ -2877,7 +2878,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             <div className="flex items-center gap-3">
                               {isMuted ? (
                                 <VolumeX
-                                  size={20}
                                   className={
                                     theme === "dark"
                                       ? "text-slate-300"
@@ -2886,7 +2886,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 />
                               ) : (
                                 <Volume2
-                                  size={20}
                                   className={
                                     theme === "dark"
                                       ? "text-slate-300"
@@ -2894,8 +2893,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                   }
                                 />
                               )}
-                              <label
-                                htmlFor="mute-toggle"
+                              <span
                                 className={cn(
                                   "text-sm font-medium",
                                   theme === "dark"
@@ -2904,20 +2902,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 )}
                               >
                                 Som das Notificações
-                              </label>
+                              </span>
                             </div>
                             <Button
-                              id="mute-toggle"
+                              size="sm"
                               onClick={toggleMute}
                               variant={isMuted ? "secondary" : "default"}
-                              size="sm"
-                              className="w-24 text-xs"
                             >
                               {isMuted ? "Ativar" : "Mutar"}
                             </Button>
                           </div>
-
-                          {/* Filtrar por Hub */}
                           <div
                             className={cn(
                               "p-4 rounded-lg border",
@@ -2926,16 +2920,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 : "bg-orange-50/80 border-orange-200/50",
                             )}
                           >
-                            <div className="flex items-center gap-3 mb-3">
+                            <div className="flex items-center gap-2 mb-2">
                               <Building
-                                size={20}
+                                size={16}
                                 className={
                                   theme === "dark"
                                     ? "text-slate-300"
                                     : "text-slate-600"
                                 }
                               />
-                              <label
+                              <span
                                 className={cn(
                                   "text-sm font-medium",
                                   theme === "dark"
@@ -2943,52 +2937,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     : "text-slate-800",
                                 )}
                               >
-                                Filtrar por Hub
-                              </label>
+                                Hub Padrão
+                              </span>
                             </div>
-                            <div className="relative">
-                              <SearchableSelect
-                                options={[...HUBS]}
-                                value={adminProfile.hub || ""}
-                                onChange={(value) => {
-                                  const selectedHub = value;
-                                  const city = getCityFromHub(selectedHub);
-                                  setAdminProfile((prev) => ({
-                                    ...prev,
-                                    hub: selectedHub,
-                                    city: city,
-                                  }));
-                                  // Salvar imediatamente
-                                  const user = auth.currentUser;
-                                  if (user) {
-                                    updateDoc(
-                                      doc(db, "admins_pre_aprovados", user.uid),
-                                      {
-                                        hub: selectedHub,
-                                        city: city,
-                                      },
-                                    ).catch((error) => {
-                                      console.error(
-                                        "Erro ao salvar hub:",
-                                        error,
-                                      );
-                                      sonnerToast.error(
-                                        "Erro ao salvar hub selecionado",
-                                      );
-                                    });
-                                  }
-                                }}
-                                placeholder="Selecione um Hub"
-                                icon={Building}
-                              />
-                            </div>
+                            <SearchableSelect
+                              options={[...HUBS]}
+                              value={adminProfile.hub}
+                              onChange={(val) => {
+                                const city = getCityFromHub(val);
+                                setAdminProfile((prev) => ({
+                                  ...prev,
+                                  hub: val,
+                                  city,
+                                }));
+                                const user = auth.currentUser;
+                                if (user)
+                                  updateDoc(
+                                    doc(db, "admins_pre_aprovados", user.uid),
+                                    { hub: val, city },
+                                  );
+                              }}
+                              placeholder="Selecione..."
+                              icon={Building}
+                            />
                           </div>
                         </CardContent>
                       </Card>
                     </div>
 
-                    {/* Coluna Direita - Formulário Completo e Previsão do Tempo */}
-                    <div className="lg:col-span-2 space-y-6">
+                    <div className="lg:col-span-2">
                       <Card
                         className={cn(
                           "shadow-lg border",
@@ -3005,571 +2982,71 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 : "text-slate-800",
                             )}
                           >
-                            Perfil do Administrador
+                            Dados Pessoais e Profissionais
                           </CardTitle>
                         </CardHeader>
-                        <CardContent className="space-y-6">
-                          {isLoadingProfile ? (
-                            <div className="flex items-center justify-center py-12">
-                              <Loading size="lg" variant="spinner" />
+                        <CardContent className="space-y-4">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="md:col-span-2">
+                              <label className="text-sm font-medium mb-1 block">
+                                Nome Completo
+                              </label>
+                              <input
+                                type="text"
+                                value={adminProfile.name}
+                                onChange={(e) =>
+                                  setAdminProfile((p) => ({
+                                    ...p,
+                                    name: e.target.value,
+                                  }))
+                                }
+                                className="w-full p-2 rounded border bg-transparent"
+                              />
                             </div>
-                          ) : (
-                            <>
-                              {/* Informações Pessoais */}
-                              <div className="space-y-4">
-                                <h3
-                                  className={cn(
-                                    "text-lg font-bold pb-2 border-b",
-                                    theme === "dark"
-                                      ? "text-white border-orange-500/30"
-                                      : "text-slate-800 border-orange-200/50",
-                                  )}
-                                >
-                                  Informações Pessoais
-                                </h3>
-
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                  {/* Nome */}
-                                  <div className="md:col-span-2 space-y-2">
-                                    <label
-                                      className={cn(
-                                        "text-sm font-semibold flex items-center gap-2",
-                                        theme === "dark"
-                                          ? "text-slate-300"
-                                          : "text-slate-700",
-                                      )}
-                                    >
-                                      <User size={16} />
-                                      Nome Completo *
-                                    </label>
-                                    <input
-                                      type="text"
-                                      value={adminProfile.name}
-                                      onChange={(e) =>
-                                        setAdminProfile((prev) => ({
-                                          ...prev,
-                                          name: e.target.value,
-                                        }))
-                                      }
-                                      className={cn(
-                                        "w-full p-3 rounded-xl border outline-none transition-all",
-                                        theme === "dark"
-                                          ? "bg-orange-500/20 border-orange-500/30 text-white placeholder:text-slate-400 focus:ring-2 focus:ring-orange-500/50"
-                                          : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-orange-500/50",
-                                      )}
-                                      placeholder="Digite seu nome completo"
-                                      required
-                                    />
-                                  </div>
-
-                                  {/* Email (readonly) */}
-                                  <div className="space-y-2">
-                                    <label
-                                      className={cn(
-                                        "text-sm font-semibold flex items-center gap-2",
-                                        theme === "dark"
-                                          ? "text-slate-300"
-                                          : "text-slate-700",
-                                      )}
-                                    >
-                                      <Mail size={16} />
-                                      E-mail
-                                    </label>
-                                    <input
-                                      type="email"
-                                      value={adminProfile.email}
-                                      disabled
-                                      className={cn(
-                                        "w-full p-3 rounded-xl border outline-none cursor-not-allowed opacity-60",
-                                        theme === "dark"
-                                          ? "bg-slate-700/50 border-orange-500/30 text-slate-400"
-                                          : "bg-slate-100 border-orange-200/50 text-slate-600",
-                                      )}
-                                    />
-                                  </div>
-
-                                  {/* Telefone */}
-                                  <div className="space-y-2">
-                                    <label
-                                      className={cn(
-                                        "text-sm font-semibold flex items-center gap-2",
-                                        theme === "dark"
-                                          ? "text-slate-300"
-                                          : "text-slate-700",
-                                      )}
-                                    >
-                                      <Phone size={16} />
-                                      Telefone
-                                    </label>
-                                    <input
-                                      type="tel"
-                                      value={adminProfile.phone}
-                                      onChange={(e) => {
-                                        const value = e.target.value.replace(
-                                          /\D/g,
-                                          "",
-                                        );
-                                        let formatted = value;
-                                        if (value.length > 10) {
-                                          formatted = `(${value.slice(
-                                            0,
-                                            2,
-                                          )}) ${value.slice(
-                                            2,
-                                            7,
-                                          )}-${value.slice(7, 11)}`;
-                                        } else if (value.length > 6) {
-                                          formatted = `(${value.slice(
-                                            0,
-                                            2,
-                                          )}) ${value.slice(
-                                            2,
-                                            6,
-                                          )}-${value.slice(6)}`;
-                                        } else if (value.length > 2) {
-                                          formatted = `(${value.slice(
-                                            0,
-                                            2,
-                                          )}) ${value.slice(2)}`;
-                                        }
-                                        setAdminProfile((prev) => ({
-                                          ...prev,
-                                          phone: formatted,
-                                        }));
-                                      }}
-                                      className={cn(
-                                        "w-full p-3 rounded-xl border outline-none transition-all",
-                                        theme === "dark"
-                                          ? "bg-orange-500/20 border-orange-500/30 text-white placeholder:text-slate-400 focus:ring-2 focus:ring-orange-500/50"
-                                          : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-orange-500/50",
-                                      )}
-                                      placeholder="(00) 00000-0000"
-                                      maxLength={15}
-                                    />
-                                  </div>
-
-                                  {/* WhatsApp */}
-                                  <div className="space-y-2">
-                                    <label
-                                      className={cn(
-                                        "text-sm font-semibold flex items-center gap-2",
-                                        theme === "dark"
-                                          ? "text-slate-300"
-                                          : "text-slate-700",
-                                      )}
-                                    >
-                                      <MessageCircle size={16} />
-                                      WhatsApp
-                                    </label>
-                                    <input
-                                      type="tel"
-                                      value={adminProfile.whatsapp}
-                                      onChange={(e) => {
-                                        const value = e.target.value.replace(
-                                          /\D/g,
-                                          "",
-                                        );
-                                        let formatted = value;
-                                        if (value.length > 10) {
-                                          formatted = `(${value.slice(
-                                            0,
-                                            2,
-                                          )}) ${value.slice(
-                                            2,
-                                            7,
-                                          )}-${value.slice(7, 11)}`;
-                                        } else if (value.length > 6) {
-                                          formatted = `(${value.slice(
-                                            0,
-                                            2,
-                                          )}) ${value.slice(
-                                            2,
-                                            6,
-                                          )}-${value.slice(6)}`;
-                                        } else if (value.length > 2) {
-                                          formatted = `(${value.slice(
-                                            0,
-                                            2,
-                                          )}) ${value.slice(2)}`;
-                                        }
-                                        setAdminProfile((prev) => ({
-                                          ...prev,
-                                          whatsapp: formatted,
-                                        }));
-                                      }}
-                                      className={cn(
-                                        "w-full p-3 rounded-xl border outline-none transition-all",
-                                        theme === "dark"
-                                          ? "bg-orange-500/20 border-orange-500/30 text-white placeholder:text-slate-400 focus:ring-2 focus:ring-orange-500/50"
-                                          : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-orange-500/50",
-                                      )}
-                                      placeholder="(00) 00000-0000"
-                                      maxLength={15}
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* Informações Profissionais */}
-                              <div className="space-y-4">
-                                <h3
-                                  className={cn(
-                                    "text-lg font-bold pb-2 border-b",
-                                    theme === "dark"
-                                      ? "text-white border-orange-500/30"
-                                      : "text-slate-800 border-orange-200/50",
-                                  )}
-                                >
-                                  Informações Profissionais
-                                </h3>
-
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                  {/* Departamento */}
-                                  <div className="space-y-2">
-                                    <label
-                                      className={cn(
-                                        "text-sm font-semibold flex items-center gap-2",
-                                        theme === "dark"
-                                          ? "text-slate-300"
-                                          : "text-slate-700",
-                                      )}
-                                    >
-                                      <Building size={16} />
-                                      Departamento
-                                    </label>
-                                    <input
-                                      type="text"
-                                      value={adminProfile.department}
-                                      onChange={(e) =>
-                                        setAdminProfile((prev) => ({
-                                          ...prev,
-                                          department: e.target.value,
-                                        }))
-                                      }
-                                      className={cn(
-                                        "w-full p-3 rounded-xl border outline-none transition-all",
-                                        theme === "dark"
-                                          ? "bg-orange-500/20 border-orange-500/30 text-white placeholder:text-slate-400 focus:ring-2 focus:ring-orange-500/50"
-                                          : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-orange-500/50",
-                                      )}
-                                      placeholder="Ex: Logística, Operações"
-                                    />
-                                  </div>
-
-                                  {/* Cargo */}
-                                  <div className="space-y-2">
-                                    <label
-                                      className={cn(
-                                        "text-sm font-semibold flex items-center gap-2",
-                                        theme === "dark"
-                                          ? "text-slate-300"
-                                          : "text-slate-700",
-                                      )}
-                                    >
-                                      <Briefcase size={16} />
-                                      Cargo
-                                    </label>
-                                    <input
-                                      type="text"
-                                      value={adminProfile.position}
-                                      onChange={(e) =>
-                                        setAdminProfile((prev) => ({
-                                          ...prev,
-                                          position: e.target.value,
-                                        }))
-                                      }
-                                      className={cn(
-                                        "w-full p-3 rounded-xl border outline-none transition-all",
-                                        theme === "dark"
-                                          ? "bg-orange-500/20 border-orange-500/30 text-white placeholder:text-slate-400 focus:ring-2 focus:ring-orange-500/50"
-                                          : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-orange-500/50",
-                                      )}
-                                      placeholder="Ex: Gerente, Coordenador"
-                                    />
-                                  </div>
-
-                                  {/* LinkedIn */}
-                                  <div className="md:col-span-2 space-y-2">
-                                    <label
-                                      className={cn(
-                                        "text-sm font-semibold flex items-center gap-2",
-                                        theme === "dark"
-                                          ? "text-slate-300"
-                                          : "text-slate-700",
-                                      )}
-                                    >
-                                      <Linkedin size={16} />
-                                      LinkedIn
-                                    </label>
-                                    <input
-                                      type="url"
-                                      value={adminProfile.linkedin}
-                                      onChange={(e) =>
-                                        setAdminProfile((prev) => ({
-                                          ...prev,
-                                          linkedin: e.target.value,
-                                        }))
-                                      }
-                                      className={cn(
-                                        "w-full p-3 rounded-xl border outline-none transition-all",
-                                        theme === "dark"
-                                          ? "bg-orange-500/20 border-orange-500/30 text-white placeholder:text-slate-400 focus:ring-2 focus:ring-orange-500/50"
-                                          : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-orange-500/50",
-                                      )}
-                                      placeholder="https://linkedin.com/in/seu-perfil"
-                                    />
-                                  </div>
-
-                                  {/* Biografia */}
-                                  <div className="md:col-span-2 space-y-2">
-                                    <label
-                                      className={cn(
-                                        "text-sm font-semibold flex items-center gap-2",
-                                        theme === "dark"
-                                          ? "text-slate-300"
-                                          : "text-slate-700",
-                                      )}
-                                    >
-                                      <FileText size={16} />
-                                      Biografia
-                                    </label>
-                                    <textarea
-                                      value={adminProfile.bio}
-                                      onChange={(e) =>
-                                        setAdminProfile((prev) => ({
-                                          ...prev,
-                                          bio: e.target.value,
-                                        }))
-                                      }
-                                      rows={4}
-                                      className={cn(
-                                        "w-full p-3 rounded-xl border outline-none transition-all resize-none",
-                                        theme === "dark"
-                                          ? "bg-orange-500/20 border-orange-500/30 text-white placeholder:text-slate-400 focus:ring-2 focus:ring-orange-500/50"
-                                          : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-orange-500/50",
-                                      )}
-                                      placeholder="Conte um pouco sobre você..."
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* Endereço */}
-                              <div className="space-y-4">
-                                <h3
-                                  className={cn(
-                                    "text-lg font-bold pb-2 border-b",
-                                    theme === "dark"
-                                      ? "text-white border-orange-500/30"
-                                      : "text-slate-800 border-orange-200/50",
-                                  )}
-                                >
-                                  Endereço
-                                </h3>
-
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                  {/* CEP */}
-                                  <div className="space-y-2">
-                                    <label
-                                      className={cn(
-                                        "text-sm font-semibold flex items-center gap-2",
-                                        theme === "dark"
-                                          ? "text-slate-300"
-                                          : "text-slate-700",
-                                      )}
-                                    >
-                                      <Hash size={16} />
-                                      CEP
-                                    </label>
-                                    <input
-                                      type="text"
-                                      value={adminProfile.zipCode}
-                                      onChange={(e) => {
-                                        const value = e.target.value.replace(
-                                          /\D/g,
-                                          "",
-                                        );
-                                        let formatted = value;
-                                        if (value.length > 5) {
-                                          formatted = `${value.slice(
-                                            0,
-                                            5,
-                                          )}-${value.slice(5, 8)}`;
-                                        }
-                                        setAdminProfile((prev) => ({
-                                          ...prev,
-                                          zipCode: formatted,
-                                        }));
-                                      }}
-                                      className={cn(
-                                        "w-full p-3 rounded-xl border outline-none transition-all",
-                                        theme === "dark"
-                                          ? "bg-orange-500/20 border-orange-500/30 text-white placeholder:text-slate-400 focus:ring-2 focus:ring-orange-500/50"
-                                          : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-orange-500/50",
-                                      )}
-                                      placeholder="00000-000"
-                                      maxLength={9}
-                                    />
-                                  </div>
-
-                                  {/* Cidade */}
-                                  <div className="space-y-2">
-                                    <label
-                                      className={cn(
-                                        "text-sm font-semibold flex items-center gap-2",
-                                        theme === "dark"
-                                          ? "text-slate-300"
-                                          : "text-slate-700",
-                                      )}
-                                    >
-                                      <MapPin size={16} />
-                                      Cidade
-                                    </label>
-                                    <input
-                                      type="text"
-                                      value={adminProfile.city}
-                                      onChange={(e) =>
-                                        setAdminProfile((prev) => ({
-                                          ...prev,
-                                          city: e.target.value,
-                                        }))
-                                      }
-                                      className={cn(
-                                        "w-full p-3 rounded-xl border outline-none transition-all",
-                                        theme === "dark"
-                                          ? "bg-orange-500/20 border-orange-500/30 text-white placeholder:text-slate-400 focus:ring-2 focus:ring-orange-500/50"
-                                          : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-orange-500/50",
-                                      )}
-                                      placeholder="Digite a cidade"
-                                    />
-                                  </div>
-
-                                  {/* Estado */}
-                                  <div className="space-y-2">
-                                    <label
-                                      className={cn(
-                                        "text-sm font-semibold flex items-center gap-2",
-                                        theme === "dark"
-                                          ? "text-slate-300"
-                                          : "text-slate-700",
-                                      )}
-                                    >
-                                      <Building size={16} />
-                                      Estado
-                                    </label>
-                                    <input
-                                      type="text"
-                                      value={adminProfile.state}
-                                      onChange={(e) =>
-                                        setAdminProfile((prev) => ({
-                                          ...prev,
-                                          state: e.target.value.toUpperCase(),
-                                        }))
-                                      }
-                                      className={cn(
-                                        "w-full p-3 rounded-xl border outline-none transition-all",
-                                        theme === "dark"
-                                          ? "bg-orange-500/20 border-orange-500/30 text-white placeholder:text-slate-400 focus:ring-2 focus:ring-orange-500/50"
-                                          : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-orange-500/50",
-                                      )}
-                                      placeholder="UF"
-                                      maxLength={2}
-                                    />
-                                  </div>
-
-                                  {/* Endereço Completo */}
-                                  <div className="md:col-span-2 space-y-2">
-                                    <label
-                                      className={cn(
-                                        "text-sm font-semibold flex items-center gap-2",
-                                        theme === "dark"
-                                          ? "text-slate-300"
-                                          : "text-slate-700",
-                                      )}
-                                    >
-                                      <Home size={16} />
-                                      Endereço Completo
-                                    </label>
-                                    <input
-                                      type="text"
-                                      value={adminProfile.address}
-                                      onChange={(e) =>
-                                        setAdminProfile((prev) => ({
-                                          ...prev,
-                                          address: e.target.value,
-                                        }))
-                                      }
-                                      className={cn(
-                                        "w-full p-3 rounded-xl border outline-none transition-all",
-                                        theme === "dark"
-                                          ? "bg-orange-500/20 border-orange-500/30 text-white placeholder:text-slate-400 focus:ring-2 focus:ring-orange-500/50"
-                                          : "bg-white border-orange-200/50 text-slate-800 placeholder:text-slate-500 focus:ring-2 focus:ring-orange-500/50",
-                                      )}
-                                      placeholder="Rua, número, complemento"
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-                            </>
-                          )}
+                            <div>
+                              <label className="text-sm font-medium mb-1 block">
+                                Email
+                              </label>
+                              <input
+                                type="text"
+                                value={adminProfile.email}
+                                disabled
+                                className="w-full p-2 rounded border bg-muted/50 cursor-not-allowed"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-sm font-medium mb-1 block">
+                                Telefone
+                              </label>
+                              <input
+                                type="text"
+                                value={adminProfile.phone}
+                                onChange={(e) =>
+                                  setAdminProfile((p) => ({
+                                    ...p,
+                                    phone: e.target.value,
+                                  }))
+                                }
+                                className="w-full p-2 rounded border bg-transparent"
+                              />
+                            </div>
+                          </div>
                         </CardContent>
-                        <CardFooter className="flex justify-end gap-3 pt-6 border-t border-border">
+                        <CardFooter className="flex justify-end pt-4">
                           <Button
                             onClick={handleSaveProfile}
-                            disabled={isSavingProfile || isLoadingProfile}
-                            className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-md px-8"
-                            size="lg"
+                            disabled={isSavingProfile}
                           >
                             {isSavingProfile ? (
-                              <>
-                                <Loading
-                                  size="sm"
-                                  variant="spinner"
-                                  className="mr-2"
-                                />
-                                Salvando...
-                              </>
+                              <Loading size="sm" />
                             ) : (
                               <>
-                                <Save size={18} className="mr-2" />
-                                Salvar Alterações
+                                <Save size={16} className="mr-2" /> Salvar
+                                Alterações
                               </>
                             )}
                           </Button>
                         </CardFooter>
-                      </Card>
-
-                      {/* Monitoramento de Usuários Online */}
-                      <OnlineUsersMonitor theme={theme} />
-
-                      {/* Previsão do Tempo */}
-                      <Card
-                        className={cn(
-                          "shadow-lg border",
-                          theme === "dark"
-                            ? "bg-slate-800/90 border-orange-500/30"
-                            : "bg-white/80 border-orange-200/50",
-                        )}
-                      >
-                        <CardContent className="pt-6">
-                          <WeatherForecast
-                            city={
-                              adminProfile.city ||
-                              getCityFromHub(adminProfile.hub)
-                            }
-                            hub={adminProfile.hub}
-                            theme={theme}
-                            showDetailed={true}
-                            selectedDay={selectedWeatherDay}
-                            onDayClick={(day) => {
-                              setSelectedWeatherDay(
-                                selectedWeatherDay === day.date
-                                  ? null
-                                  : day.date,
-                              );
-                            }}
-                          />
-                        </CardContent>
                       </Card>
                     </div>
                   </div>
@@ -3586,6 +3063,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             onClose={() => setInfoModalDriver(null)}
           />
         )}
+
         <CallDetailsModal
           call={selectedCall}
           onClose={() => setSelectedCall(null)}
@@ -3593,7 +3071,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             updateCall(id, updates);
             setSelectedCall(null);
           }}
+          drivers={drivers}
         />
+
         <ConfirmationModal
           isOpen={!!confirmationType}
           onClose={() => setConfirmationType(null)}
