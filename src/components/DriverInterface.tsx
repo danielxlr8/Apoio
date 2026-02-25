@@ -645,6 +645,16 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     return localDriverStatus !== "INDISPONIVEL";
   }, [localDriverStatus]);
 
+  const myIds = useMemo(() => {
+    const ids: string[] = [];
+    if (userId) ids.push(userId);
+    if (driver?.uid) ids.push(driver.uid);
+    return Array.from(new Set(ids));
+  }, [userId, driver?.uid]);
+
+  const myIdsRef = useRef<string[]>([]);
+  myIdsRef.current = myIds;
+
   // ==========================================
   // CONFIGURAÇÃO DO TOUR (CORRIGIDA - REMOVIDO ARRAYS DE IMAGENS)
   // ==========================================
@@ -741,7 +751,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     {
       target: "body",
       content:
-        "Tudo pronto! Agradecimentos especiais a Bruno Aschwanden pela criação dos mascotes! 🎉",
+        "Tudo pronto! Boa Sorte na sua jornada, estarei aqui se precisar.! 🎉",
       title: "Vamos Começar!",
       placement: "center",
       data: {
@@ -797,23 +807,45 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     );
   }, [driver, shopeeId]);
 
+  const ACTIVE_STATUSES = [
+    "ABERTO",
+    "EM ANDAMENTO",
+    "AGUARDANDO_APROVACAO",
+  ] as const;
+
   const activeCallForDriver = useMemo(() => {
     return (
       allMyCalls.find(
         (call) =>
-          call.solicitante.id === userId &&
-          ["ABERTO", "EM ANDAMENTO", "AGUARDANDO_APROVACAO"].includes(
-            call.status,
-          ),
+          myIds.includes(call.solicitante?.id ?? "") &&
+          (ACTIVE_STATUSES as readonly string[]).includes(call.status),
       ) || null
     );
-  }, [allMyCalls, userId]);
+  }, [allMyCalls, myIds]);
 
   const activeProviderCall = useMemo(() => {
-    return allMyCalls.find(
-      (c) => c.assignedTo === userId && ["EM ANDAMENTO"].includes(c.status),
+    return (
+      allMyCalls.find(
+        (c) =>
+          myIds.includes(c.assignedTo ?? "") &&
+          (ACTIVE_STATUSES as readonly string[]).includes(c.status),
+      ) || null
     );
-  }, [allMyCalls, userId]);
+  }, [allMyCalls, myIds]);
+
+  const hasActiveCall = useMemo(() => {
+    return allMyCalls.some((call) => {
+      if (!(ACTIVE_STATUSES as readonly string[]).includes(call.status))
+        return false;
+      const isSolicitante = myIds.includes(call.solicitante?.id ?? "");
+      const isPrestador = myIds.includes(call.assignedTo ?? "");
+      return isSolicitante || isPrestador;
+    });
+  }, [allMyCalls, myIds]);
+
+  const canAcceptNewCall = useMemo(() => {
+    return !activeCallForDriver && !activeProviderCall;
+  }, [activeCallForDriver, activeProviderCall]);
 
   const driverWithLocalStatus = useMemo(() => {
     return {
@@ -850,18 +882,16 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     return active;
   }, [allMyCalls, historyFilter, userId, globalHubFilter]);
 
-  // src/components/DriverInterface.tsx
-
   const filteredOpenCalls = useMemo(
     () =>
       openSupportCalls.filter(
         (c) =>
-          c.solicitante.id !== userId && // <--- CORREÇÃO: Filtro explícito de segurança
+          !myIds.includes(c.solicitante?.id) &&
           (globalHubFilter === "Todos os Hubs" || c.hub === globalHubFilter) &&
           (!routeIdSearch ||
             c.routeId?.toLowerCase().includes(routeIdSearch.toLowerCase())),
       ),
-    [openSupportCalls, routeIdSearch, globalHubFilter, userId], // <--- Adicionado userId nas dependências
+    [openSupportCalls, routeIdSearch, globalHubFilter, myIds],
   );
   const rankedDrivers = useMemo(() => {
     return [...allDrivers]
@@ -1136,7 +1166,8 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     const end = endDate ? new Date(endDate) : new Date();
     end.setHours(23, 59, 59, 999);
 
-    const myCallsQuery = query(
+    const driverFirestoreUid = driver?.uid || "";
+    const myCallsQueryByAuth = query(
       collection(db, "supportCalls"),
       and(
         or(
@@ -1148,12 +1179,74 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       ),
       orderBy("timestamp", "desc"),
     );
-    const unsubscribeMyCalls = onSnapshot(myCallsQuery, (snapshot) => {
-      const callsData = snapshot.docs.map(
-        (doc) => ({ id: doc.id, ...doc.data() }) as SupportCall,
-      );
-      setAllMyCalls(callsData);
-    });
+
+    const myCallsQueryByFirestoreUid =
+      driverFirestoreUid && driverFirestoreUid !== userId
+        ? query(
+            collection(db, "supportCalls"),
+            and(
+              or(
+                where("solicitante.id", "==", driverFirestoreUid),
+                where("assignedTo", "==", driverFirestoreUid),
+              ),
+              where("timestamp", ">=", Timestamp.fromDate(start)),
+              where("timestamp", "<=", Timestamp.fromDate(end)),
+            ),
+            orderBy("timestamp", "desc"),
+          )
+        : null;
+
+    const mergeAndDeduplicateCalls = (
+      primary: SupportCall[],
+      secondary: SupportCall[],
+    ): SupportCall[] => {
+      const map = new Map<string, SupportCall>();
+      [...primary, ...secondary].forEach((c) => map.set(c.id, c));
+      return Array.from(map.values()).sort((a, b) => {
+        const tA =
+          (a.timestamp as any)?.toMillis?.() ??
+          ((a.timestamp as any)?.seconds != null
+            ? (a.timestamp as any).seconds * 1000
+            : 0);
+        const tB =
+          (b.timestamp as any)?.toMillis?.() ??
+          ((b.timestamp as any)?.seconds != null
+            ? (b.timestamp as any).seconds * 1000
+            : 0);
+        return tB - tA;
+      });
+    };
+
+    let callsByAuth: SupportCall[] = [];
+    let callsByFirestoreUid: SupportCall[] = [];
+
+    const unsubscribeMyCallsAuth = onSnapshot(
+      myCallsQueryByAuth,
+      (snapshot) => {
+        callsByAuth = snapshot.docs.map(
+          (doc) => ({ id: doc.id, ...doc.data() }) as SupportCall,
+        );
+        setAllMyCalls(
+          mergeAndDeduplicateCalls(callsByAuth, callsByFirestoreUid),
+        );
+      },
+    );
+
+    const unsubscribeMyCallsFirestoreUid = myCallsQueryByFirestoreUid
+      ? onSnapshot(myCallsQueryByFirestoreUid, (snapshot) => {
+          callsByFirestoreUid = snapshot.docs.map(
+            (doc) => ({ id: doc.id, ...doc.data() }) as SupportCall,
+          );
+          setAllMyCalls(
+            mergeAndDeduplicateCalls(callsByAuth, callsByFirestoreUid),
+          );
+        })
+      : null;
+
+    const unsubscribeMyCalls = () => {
+      unsubscribeMyCallsAuth();
+      if (unsubscribeMyCallsFirestoreUid) unsubscribeMyCallsFirestoreUid();
+    };
 
     const openCallsQuery = query(
       collection(db, "supportCalls"),
@@ -1165,7 +1258,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
           id: change.doc.id,
           ...change.doc.data(),
         } as SupportCall;
-        if (callData.solicitante.id !== userId) {
+        if (!myIdsRef.current.includes(callData.solicitante?.id ?? "")) {
           if (change.type === "added" && !isInitialOpenCallsLoad.current)
             triggerNotificationRef.current(callData);
           if (change.type === "removed")
@@ -1177,7 +1270,9 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
         (doc) => ({ id: doc.id, ...doc.data() }) as SupportCall,
       );
       setOpenSupportCalls(
-        openCallsData.filter((call) => call.solicitante.id !== userId),
+        openCallsData.filter(
+          (call) => !myIdsRef.current.includes(call.solicitante?.id),
+        ),
       );
     });
 
@@ -1523,8 +1618,10 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       setIsSubmitting(false);
       return;
     }
-    if (activeCallForDriver) {
-      setModalError("Você já tem uma solicitação de apoio em aberto.");
+    if (hasActiveCall) {
+      setModalError(
+        "Você já tem um apoio em andamento, finalize o primeiro para realizar uma nova solicitação.",
+      );
       setIsSubmitting(false);
       return;
     }
@@ -1834,6 +1931,8 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                   onRouteIdSearchChange={setRouteIdSearch}
                   acceptingCallId={acceptingCallId}
                   onAcceptCall={handleAcceptCall}
+                  canAcceptNewCall={canAcceptNewCall}
+                  myIds={myIds}
                   theme={theme}
                 />
               </div>
@@ -1876,13 +1975,16 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                               <p className="text-xs text-slate-500">
                                 {call.routeId}
                               </p>
-                              <Button
-                                size="sm"
-                                className="mt-2 w-full h-7 text-xs"
-                                onClick={() => handleAcceptCall(call.id)}
-                              >
-                                Aceitar
-                              </Button>
+                              {canAcceptNewCall &&
+                                !myIds.includes(call.solicitante?.id) && (
+                                  <Button
+                                    size="sm"
+                                    className="mt-2 w-full h-7 text-xs"
+                                    onClick={() => handleAcceptCall(call.id)}
+                                  >
+                                    Aceitar
+                                  </Button>
+                                )}
                             </div>
                           </Popup>
                         </Marker>
@@ -2125,23 +2227,29 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     imprevistos. Mínimo de 20 pacotes.
                   </p>
                 </div>
-                <Button
+                <button
+                  type="button"
                   onClick={() => {
-                    if (activeCallForDriver) {
+                    if (hasActiveCall) {
                       showNotification(
                         "error",
-                        "Atenção",
-                        "Você já possui um chamado ativo.",
+                        "Acesso Negado",
+                        "Você já tem um apoio em andamento, finalize o primeiro para realizar uma nova solicitação.",
                       );
                       return;
                     }
                     setModalError("");
                     setIsSupportModalOpen(true);
                   }}
-                  className="w-full max-w-sm h-14 text-lg bg-primary hover:bg-primary/90 font-bold shadow-xl shadow-primary/30 rounded-xl text-primary-foreground tour-support-button"
+                  className={cn(
+                    "w-full max-w-sm h-14 text-lg font-bold shadow-xl shadow-primary/30 rounded-xl text-primary-foreground tour-support-button transition-all",
+                    hasActiveCall
+                      ? "bg-primary opacity-50 grayscale cursor-not-allowed hover:bg-primary"
+                      : "bg-primary hover:bg-primary/90",
+                  )}
                 >
                   SOLICITAR SOCORRO
-                </Button>
+                </button>
               </div>
             )}
 

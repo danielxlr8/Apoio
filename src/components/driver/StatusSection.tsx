@@ -19,6 +19,8 @@ interface StatusSectionProps {
   onRouteIdSearchChange: (value: string) => void;
   acceptingCallId: string | null;
   onAcceptCall: (callId: string) => void;
+  canAcceptNewCall: boolean;
+  myIds: string[];
   theme?: "light" | "dark";
 }
 
@@ -30,6 +32,8 @@ export const StatusSection: React.FC<StatusSectionProps> = ({
   onRouteIdSearchChange,
   acceptingCallId,
   onAcceptCall,
+  canAcceptNewCall,
+  myIds,
   theme = "light",
 }) => {
   // SE O CARD ESTIVER BRANCO, SIGNIFICA QUE 'theme' ESTÁ CHEGANDO COMO 'light'.
@@ -268,6 +272,8 @@ export const StatusSection: React.FC<StatusSectionProps> = ({
                   call={call}
                   acceptingCallId={acceptingCallId}
                   onAccept={onAcceptCall}
+                  canAcceptNewCall={canAcceptNewCall}
+                  myIds={myIds}
                   theme={theme}
                 />
               ))

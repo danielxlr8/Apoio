@@ -19,14 +19,18 @@ interface OpenCallCardProps {
   call: SupportCall;
   acceptingCallId: string | null;
   onAccept: (callId: string) => void;
-  theme?: "light" | "dark"; // Adicionada a propriedade theme
+  canAcceptNewCall: boolean;
+  myIds: string[];
+  theme?: "light" | "dark";
 }
 
 export const OpenCallCard: React.FC<OpenCallCardProps> = ({
   call,
   acceptingCallId,
   onAccept,
-  theme = "light", // Valor padrão
+  canAcceptNewCall,
+  myIds,
+  theme = "light",
 }) => {
   const isAccepting = acceptingCallId === call.id;
 
@@ -442,37 +446,39 @@ export const OpenCallCard: React.FC<OpenCallCardProps> = ({
       </a>
 
       {/* Botão Aceitar Maior */}
-      <button
-        onClick={() => onAccept(call.id)}
-        disabled={!!acceptingCallId}
-        className="w-full py-4 rounded-xl text-sm font-bold text-primary-foreground bg-primary hover:bg-primary/90 transition-all disabled:opacity-50 shadow-xl flex items-center justify-center gap-2"
-      >
-        {isAccepting ? (
-          <>
-            <Loading size="sm" variant="spinner" />
-            <span>Aceitando...</span>
-          </>
-        ) : (
-          <>
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <path
-                d="M9 12L11 14L15 10M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-            ACEITAR CHAMADO
-          </>
-        )}
-      </button>
+      {canAcceptNewCall && !myIds.includes(call.solicitante?.id) && (
+        <button
+          onClick={() => onAccept(call.id)}
+          disabled={!!acceptingCallId}
+          className="w-full py-4 rounded-xl text-sm font-bold text-primary-foreground bg-primary hover:bg-primary/90 transition-all disabled:opacity-50 shadow-xl flex items-center justify-center gap-2"
+        >
+          {isAccepting ? (
+            <>
+              <Loading size="sm" variant="spinner" />
+              <span>Aceitando...</span>
+            </>
+          ) : (
+            <>
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M9 12L11 14L15 10M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              ACEITAR CHAMADO
+            </>
+          )}
+        </button>
+      )}
     </div>
   );
 };
