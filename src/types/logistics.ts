@@ -5,6 +5,7 @@ export type CallStatus =
   | "ABERTO"
   | "EM ANDAMENTO"
   | "AGUARDANDO_APROVACAO"
+  | "APROVADO_PELO_ADMIN"
   | "DEVOLUCAO"
   | "CONCLUIDO"
   | "EXCLUIDO"

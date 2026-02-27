@@ -191,6 +191,126 @@ const StarRating = ({
   );
 };
 
+const RatingBlock = ({
+  call,
+  isRequester,
+  isDark,
+  onRateDriver,
+}: {
+  call: any;
+  isRequester: boolean;
+  isDark: boolean;
+  onRateDriver: (
+    callId: string,
+    targetUid: string,
+    avgRating: number,
+    categories: { atendimento: number; agilidade: number; educacao: number },
+    ratingKey: string,
+  ) => Promise<void>;
+}) => {
+  const myRatingKey = isRequester ? "ratingByRequester" : "ratingByProvider";
+  const alreadyRated = !!call[myRatingKey];
+  const ratedTarget = isRequester ? call.assignedTo : call.solicitante?.id;
+
+  const [atendimento, setAtendimento] = useState(0);
+  const [agilidade, setAgilidade] = useState(0);
+  const [educacao, setEducacao] = useState(0);
+  const [submitting, setSubmitting] = useState(false);
+
+  if (alreadyRated) {
+    return (
+      <div className="col-span-2 mt-2">
+        <div
+          className={cn(
+            "p-3 rounded-xl border text-center",
+            isDark
+              ? "bg-yellow-500/10 border-yellow-500/30"
+              : "bg-yellow-50 border-yellow-200",
+          )}
+        >
+          <span
+            className={cn(
+              "text-xs font-bold flex items-center justify-center gap-1",
+              isDark ? "text-yellow-300" : "text-yellow-700",
+            )}
+          >
+            <Star size={12} className="fill-yellow-400 text-yellow-400" />
+            Avaliação enviada
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  const categories = [
+    { label: "Atendimento", val: atendimento, set: setAtendimento },
+    { label: "Agilidade", val: agilidade, set: setAgilidade },
+    { label: "Educação e Respeito", val: educacao, set: setEducacao },
+  ];
+
+  const allFilled = atendimento > 0 && agilidade > 0 && educacao > 0;
+
+  return (
+    <div className="col-span-2 mt-2">
+      <div
+        className={cn(
+          "p-3 rounded-xl border space-y-3",
+          isDark
+            ? "bg-yellow-500/10 border-yellow-500/30"
+            : "bg-yellow-50 border-yellow-200",
+        )}
+      >
+        <p
+          className={cn(
+            "text-xs font-bold uppercase tracking-wide",
+            isDark ? "text-yellow-200" : "text-yellow-800",
+          )}
+        >
+          Avalie o apoio
+        </p>
+        {categories.map(({ label, val, set }) => (
+          <div key={label} className="flex items-center justify-between">
+            <span
+              className={cn(
+                "text-[11px] font-medium",
+                isDark ? "text-white/70" : "text-slate-600",
+              )}
+            >
+              {label}
+            </span>
+            <StarRating rating={val} onRate={(r) => set(r)} />
+          </div>
+        ))}
+        <button
+          disabled={submitting || !allFilled || !ratedTarget}
+          onClick={async () => {
+            if (!ratedTarget) return;
+            setSubmitting(true);
+            const avg = parseFloat(
+              ((atendimento + agilidade + educacao) / 3).toFixed(2),
+            );
+            await onRateDriver(
+              call.id,
+              ratedTarget,
+              avg,
+              { atendimento, agilidade, educacao },
+              myRatingKey,
+            );
+            setSubmitting(false);
+          }}
+          className={cn(
+            "w-full py-2 rounded-xl text-xs font-bold transition-all",
+            "bg-yellow-500 hover:bg-yellow-600 text-white shadow-md",
+            "disabled:opacity-40 disabled:cursor-not-allowed",
+          )}
+        >
+          {submitting ? "Enviando..." : "Enviar Avaliação"}
+        </button>
+      </div>
+    </div>
+  );
+};
+
 const DriverCallHistoryCard = ({
   call,
   userId,
@@ -201,11 +321,19 @@ const DriverCallHistoryCard = ({
   onDeleteSupportRequest,
   onRateDriver,
 }: any) => {
-  const isRequester = call.solicitante.id === userId;
+  const isRequester =
+    call.solicitante?.id === driver?.uid || call.solicitante?.id === userId;
   const otherPartyId = isRequester ? call.assignedTo : call.solicitante.id;
   const otherParty = allDrivers.find((d: Driver) => d.uid === otherPartyId);
   const solicitante = call.solicitante;
   const prestador = call.prestador || null;
+
+  const solicitanteFull = allDrivers.find(
+    (d: Driver) => d.uid === solicitante.id,
+  );
+  const prestadorFull = prestador
+    ? allDrivers.find((d: Driver) => d.uid === prestador.id)
+    : null;
 
   const [pin, setPin] = useState("");
   const [showPinInput, setShowPinInput] = useState(false);
@@ -288,7 +416,7 @@ const DriverCallHistoryCard = ({
               isDark ? "text-white/50" : "text-slate-600",
             )}
           >
-            {call.status.replace("_", " ")}
+            {call.status.replace(/_/g, " ")}
           </p>
         </div>
       </div>
@@ -344,14 +472,21 @@ const DriverCallHistoryCard = ({
           <div className="flex items-center gap-2 p-2 rounded-xl bg-blue-500/10 border border-blue-500/30">
             <User size={14} className="text-blue-600 dark:text-blue-400" />
             <div className="flex-1">
-              <p
-                className={cn(
-                  "text-xs font-semibold",
-                  isDark ? "text-white" : "text-slate-800",
-                )}
-              >
-                {solicitante.name}
-              </p>
+              <div className="flex items-center gap-2">
+                <p
+                  className={cn(
+                    "text-xs font-semibold",
+                    isDark ? "text-white" : "text-slate-800",
+                  )}
+                >
+                  {solicitante.name}
+                </p>
+                {/* ESTRELA RENDERIZADA SEMPRE (COM FALLBACK PARA 5.0) */}
+                <div className="flex items-center gap-0.5 text-[10px] font-bold text-yellow-500 bg-yellow-500/10 px-1.5 py-0.5 rounded border border-yellow-500/20">
+                  <Star size={10} fill="currentColor" />
+                  {((solicitanteFull as any)?.ratingAverage || 5.0).toFixed(1)}
+                </div>
+              </div>
               <p
                 className={cn(
                   "text-[10px]",
@@ -376,14 +511,21 @@ const DriverCallHistoryCard = ({
             <div className="flex items-center gap-2 p-2 rounded-xl bg-green-500/10 border border-green-500/30">
               <Truck size={14} className="text-green-600 dark:text-green-400" />
               <div className="flex-1">
-                <p
-                  className={cn(
-                    "text-xs font-semibold",
-                    isDark ? "text-white" : "text-slate-800",
-                  )}
-                >
-                  {prestador.name}
-                </p>
+                <div className="flex items-center gap-2">
+                  <p
+                    className={cn(
+                      "text-xs font-semibold",
+                      isDark ? "text-white" : "text-slate-800",
+                    )}
+                  >
+                    {prestador.name}
+                  </p>
+                  {/* ESTRELA RENDERIZADA SEMPRE (COM FALLBACK PARA 5.0) */}
+                  <div className="flex items-center gap-0.5 text-[10px] font-bold text-yellow-500 bg-yellow-500/10 px-1.5 py-0.5 rounded border border-yellow-500/20">
+                    <Star size={10} fill="currentColor" />
+                    {((prestadorFull as any)?.ratingAverage || 5.0).toFixed(1)}
+                  </div>
+                </div>
                 <p
                   className={cn(
                     "text-[10px]",
@@ -419,34 +561,13 @@ const DriverCallHistoryCard = ({
             <MapPin size={12} /> {call.location} <ExternalLink size={10} />
           </a>
         </div>
-        {call.status === "CONCLUIDO" && isRequester && (
-          <div className="col-span-2 p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/30 mt-2">
-            <div className="flex justify-between items-center">
-              <span
-                className={cn(
-                  "text-xs font-bold",
-                  isDark ? "text-yellow-200" : "text-yellow-800",
-                )}
-              >
-                {call.rating ? "Sua Avaliação:" : "Avalie o apoio:"}
-              </span>
-              <StarRating
-                rating={call.rating || 0}
-                readOnly={!!call.rating}
-                onRate={(r) => onRateDriver(call.id, call.assignedTo, r)}
-              />
-            </div>
-          </div>
-        )}
-        {call.securityCode && call.status !== "CONCLUIDO" && isRequester && (
-          <div className="col-span-2 p-2 rounded-xl border border-dashed border-primary/50 bg-primary/5 flex items-center justify-between">
-            <span className="text-xs font-bold text-primary flex items-center gap-2">
-              <Lock size={12} /> PIN DE SEGURANÇA:
-            </span>
-            <span className="text-sm font-mono font-bold text-primary tracking-widest bg-white/50 dark:bg-black/20 px-2 rounded">
-              {call.securityCode}
-            </span>
-          </div>
+        {call.status === "CONCLUIDO" && (
+          <RatingBlock
+            call={call}
+            isRequester={isRequester}
+            isDark={isDark}
+            onRateDriver={onRateDriver}
+          />
         )}
         {call.cargoPhotoUrl && (
           <div className="col-span-2 p-2 rounded-xl bg-orange-500/10 dark:bg-orange-500/10 border border-orange-500/30">
@@ -474,43 +595,124 @@ const DriverCallHistoryCard = ({
         )}
       </div>
 
-      {["EM ANDAMENTO", "ABERTO", "AGUARDANDO_APROVACAO"].includes(
-        call.status,
-      ) && (
+      {/* 👇 NOVA LÓGICA DE BOTÕES INICIA AQUI */}
+      {[
+        "EM ANDAMENTO",
+        "ABERTO",
+        "AGUARDANDO_APROVACAO",
+        "APROVADO_PELO_ADMIN",
+      ].includes(call.status) && (
         <div
           className={cn(
-            "p-3 backdrop-blur-xl border-t flex justify-end gap-2 flex-wrap",
+            "p-3 backdrop-blur-xl border-t flex flex-col gap-3",
             isDark
               ? "bg-slate-800/90 border-slate-600/50"
               : "bg-orange-50/60 border-orange-200/50",
           )}
         >
-          {otherParty && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleWhatsAppClick}
-              className="h-8 text-xs gap-1.5 border-green-400/30 text-green-300 hover:bg-green-500/20 hover:text-green-200 backdrop-blur-xl rounded-xl"
-            >
-              <Phone size={14} /> Contatar
-            </Button>
-          )}
-          {!isRequester && call.status === "EM ANDAMENTO" && (
-            <>
-              {showPinInput ? (
-                <div className="flex gap-2 w-full animate-in fade-in slide-in-from-bottom-2">
+          {/* TOPO DO RODAPÉ: Botões de Contato e Cancelamento */}
+          <div className="flex justify-between items-center w-full gap-2 flex-wrap">
+            {otherParty && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleWhatsAppClick}
+                className="h-8 text-xs gap-1.5 border-green-400/30 text-green-500 hover:bg-green-500/20 rounded-xl"
+              >
+                <Phone size={14} /> Contatar
+              </Button>
+            )}
+
+            {/* ✅ BOTÃO DE CANCELAR DINÂMICO PARA O PRESTADOR */}
+            {!isRequester &&
+              ["EM ANDAMENTO", "AGUARDANDO_APROVACAO"].includes(
+                call.status,
+              ) && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={async () => {
+                    if (call.status === "AGUARDANDO_APROVACAO") {
+                      await updateDoc(doc(db, "supportCalls", call.id), {
+                        status: "EM ANDAMENTO",
+                      });
+                      sonnerToast.info("Retornado para Em Andamento.");
+                    } else {
+                      onCancelSupport(call.id);
+                    }
+                  }}
+                  className="h-8 text-xs text-red-500 hover:bg-red-500/20 rounded-xl ml-auto"
+                >
+                  Cancelar
+                </Button>
+              )}
+
+            {/* ✅ CANCELAR PEDIDO PARA O SOLICITANTE */}
+            {isRequester && call.status !== "CONCLUIDO" && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onDeleteSupportRequest(call.id)}
+                className="h-8 text-xs text-red-400 hover:bg-red-500/20 rounded-xl ml-auto"
+              >
+                <XCircle size={14} className="mr-1" /> Cancelar Pedido
+              </Button>
+            )}
+          </div>
+
+          {/* BASE DO RODAPÉ: MÁQUINA DE ESTADOS VISUAIS PARA AMBOS */}
+          <div className="w-full mt-1">
+            {isRequester ? (
+              /* ================= LÓGICA DO SOLICITANTE ================= */
+              call.status === "AGUARDANDO_APROVACAO" ? (
+                <Button
+                  size="sm"
+                  disabled
+                  className="h-8 text-xs bg-slate-800/80 text-slate-400 rounded-xl cursor-not-allowed border border-white/5 w-full flex items-center justify-center gap-2"
+                >
+                  <Lock size={14} className="text-orange-500 animate-pulse" />
+                  Aguardando liberação do Admin...
+                </Button>
+              ) : call.status === "APROVADO_PELO_ADMIN" ? (
+                <div className="flex flex-col gap-2 w-full animate-in fade-in slide-in-from-bottom-2 mt-2">
+                  <div className="p-3 bg-orange-500/10 border border-orange-500/30 rounded-xl text-center shadow-inner">
+                    <p className="text-[11px] font-bold text-orange-500 mb-1 uppercase tracking-wide">
+                      Número de PIN liberado!
+                    </p>
+                    <p className="text-[10px] text-muted-foreground mb-3 leading-tight">
+                      Repasse o código abaixo ao driver prestador para finalizar
+                      o apoio.
+                    </p>
+                    <div className="flex items-center justify-center gap-2 bg-white/60 dark:bg-black/40 py-2.5 rounded-lg border border-orange-500/20">
+                      <Lock size={14} className="text-orange-500" />
+                      <span className="text-2xl font-mono font-black text-orange-500 tracking-widest">
+                        {call.securityCode}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ) : null
+            ) : /* ================= LÓGICA DO PRESTADOR ================= */
+            showPinInput && call.status === "APROVADO_PELO_ADMIN" ? (
+              /* 🔑 CAMPO DE PIN PARA O PRESTADOR */
+              <div className="flex flex-col gap-2 w-full animate-in fade-in slide-in-from-bottom-2 mt-2">
+                <p className="text-[10px] font-bold text-orange-500 text-center uppercase mb-2 tracking-wider leading-tight">
+                  Solicite o número de pin ao solicitante ou ao admin para
+                  finalizar.
+                </p>
+                <div className="flex gap-2 w-full">
                   <input
                     type="text"
                     maxLength={4}
                     value={pin}
                     onChange={(e) => setPin(e.target.value)}
                     placeholder="PIN"
-                    className="h-8 w-20 text-center rounded-xl border border-slate-300 text-xs text-slate-800"
+                    className="h-8 w-20 text-center rounded-xl border border-slate-300 text-xs text-slate-800 focus:ring-2 focus:ring-green-500 outline-none font-bold shadow-inner"
                   />
                   <Button
                     size="sm"
                     onClick={handleVerifyAndFinish}
-                    className="h-8 text-xs bg-green-600 hover:bg-green-700 text-white rounded-xl flex-1"
+                    className="h-8 text-xs bg-green-600 hover:bg-green-700 text-white rounded-xl flex-1 font-bold shadow-lg"
                   >
                     Confirmar
                   </Button>
@@ -523,38 +725,43 @@ const DriverCallHistoryCard = ({
                     X
                   </Button>
                 </div>
-              ) : (
-                <Button
-                  size="sm"
-                  onClick={() => setShowPinInput(true)}
-                  className="h-8 text-xs bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl shadow-lg shadow-primary/30"
-                >
-                  <CheckCircle size={14} className="mr-1" /> Encaminhar para
-                  Aprovação
-                </Button>
-              )}
+              </div>
+            ) : call.status === "EM ANDAMENTO" ? (
               <Button
-                variant="ghost"
                 size="sm"
-                onClick={() => onCancelSupport(call.id)}
-                className="h-8 text-xs text-red-300 hover:bg-red-500/20 rounded-xl"
+                onClick={async () => {
+                  await updateDoc(doc(db, "supportCalls", call.id), {
+                    status: "AGUARDANDO_APROVACAO",
+                  });
+                  sonnerToast.info("Solicitado! Aguarde a liberação do Admin.");
+                }}
+                className="h-8 text-xs bg-primary hover:bg-primary/90 text-white rounded-xl shadow-lg w-full"
               >
-                Cancelar
+                <CheckCircle size={14} className="mr-1" /> Encaminhar para
+                Aprovação
               </Button>
-            </>
-          )}
-          {isRequester && call.status !== "CONCLUIDO" && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => onDeleteSupportRequest(call.id)}
-              className="h-8 text-xs text-red-300 hover:bg-red-500/20 rounded-xl"
-            >
-              <XCircle size={14} className="mr-1" /> Cancelar Pedido
-            </Button>
-          )}
+            ) : call.status === "AGUARDANDO_APROVACAO" ? (
+              <Button
+                size="sm"
+                disabled
+                className="h-8 text-xs bg-slate-800/80 text-slate-400 rounded-xl cursor-not-allowed border border-white/5 w-full flex items-center justify-center gap-2"
+              >
+                <Lock size={14} className="text-orange-500 animate-pulse" />
+                Aguardando liberação do Admin...
+              </Button>
+            ) : call.status === "APROVADO_PELO_ADMIN" ? (
+              <Button
+                size="sm"
+                onClick={() => setShowPinInput(true)}
+                className="h-8 text-xs bg-green-600 hover:bg-green-700 text-white rounded-xl shadow-lg shadow-green-900/40 font-bold animate-bounce w-full"
+              >
+                <Zap size={14} className="mr-1" /> INSERIR PIN PARA CONCLUIR
+              </Button>
+            ) : null}
+          </div>
         </div>
       )}
+      {/* 👆 NOVA LÓGICA DE BOTÕES TERMINA AQUI */}
     </Card>
   );
 };
@@ -656,10 +863,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
   myIdsRef.current = myIds;
 
   // ==========================================
-  // CONFIGURAÇÃO DO TOUR (CORRIGIDA - REMOVIDO ARRAYS DE IMAGENS)
-  // ==========================================
-  // ==========================================
-  // CONFIGURAÇÃO DO TOUR (CORRIGIDA - PASSO FINAL)
+  // CONFIGURAÇÃO DO TOUR
   // ==========================================
   const tourSteps: Step[] = [
     {
@@ -704,7 +908,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       placement: "auto",
       data: { mood: "ok" },
     },
-    // ✅ NOVO: ABA MAPA
     {
       target: ".tour-map-section",
       content:
@@ -715,7 +918,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
         mood: "map",
       },
     },
-    // ✅ NOVO: ABA RANKING
     {
       target: ".tour-ranking-section",
       content:
@@ -755,7 +957,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       title: "Vamos Começar!",
       placement: "center",
       data: {
-        mood: "finale", // <--- Comemoracao
+        mood: "finale",
       },
     },
   ];
@@ -811,6 +1013,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     "ABERTO",
     "EM ANDAMENTO",
     "AGUARDANDO_APROVACAO",
+    "APROVADO_PELO_ADMIN",
   ] as const;
 
   const activeCallForDriver = useMemo(() => {
@@ -865,34 +1068,68 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     );
   }, [hubSearch]);
 
+  // ✅ ISOLAMENTO BLINDADO DE HISTÓRICO E CHAMADOS ATIVOS (POR CIDADE DO MOTORISTA)
   const filteredCalls = useMemo(() => {
-    const active = allMyCalls.filter(
-      (c) =>
-        (globalHubFilter === "Todos os Hubs" || c.hub === globalHubFilter) &&
-        c.status !== "EXCLUIDO",
-    );
+    const active = allMyCalls.filter((c) => {
+      if (c.status === "EXCLUIDO") return false;
+
+      // Se o motorista não tem hub definido no perfil, não quebra a tela
+      if (!driver?.hub) return true;
+
+      // Extrai a cidade limpa do motorista e do chamado (Índice 2 do formato LM Hub_PR_Cidade_Sufixo)
+      const driverCity =
+        driver.hub.split("_")[2]?.trim().toLowerCase() ||
+        driver.hub.toLowerCase();
+      const callCity = c.hub
+        ? c.hub.split("_")[2]?.trim().toLowerCase() || c.hub.toLowerCase()
+        : "";
+
+      return driverCity === callCity;
+    });
+
     if (historyFilter === "requester")
-      return active.filter((c) => c.solicitante.id === userId);
+      return active.filter(
+        (c) => c.solicitante?.id && myIds.includes(c.solicitante.id),
+      );
     if (historyFilter === "provider")
-      return active.filter((c) => c.assignedTo === userId);
+      return active.filter((c) => c.assignedTo && myIds.includes(c.assignedTo));
     if (historyFilter === "inProgress")
       return active.filter((c) =>
-        ["EM ANDAMENTO", "AGUARDANDO_APROVACAO"].includes(c.status),
+        [
+          "EM ANDAMENTO",
+          "AGUARDANDO_APROVACAO",
+          "APROVADO_PELO_ADMIN",
+        ].includes(c.status),
       );
     return active;
-  }, [allMyCalls, historyFilter, userId, globalHubFilter]);
+  }, [allMyCalls, historyFilter, myIds, driver?.hub]);
 
-  const filteredOpenCalls = useMemo(
-    () =>
-      openSupportCalls.filter(
-        (c) =>
-          !myIds.includes(c.solicitante?.id) &&
-          (globalHubFilter === "Todos os Hubs" || c.hub === globalHubFilter) &&
-          (!routeIdSearch ||
-            c.routeId?.toLowerCase().includes(routeIdSearch.toLowerCase())),
-      ),
-    [openSupportCalls, routeIdSearch, globalHubFilter, myIds],
-  );
+  // ✅ ISOLAMENTO BLINDADO DE CHAMADOS ABERTOS (MAPA E LISTA "CHAMADOS NA REGIÃO")
+  const filteredOpenCalls = useMemo(() => {
+    return openSupportCalls.filter((c) => {
+      // 1. Esconde chamados criados pelo próprio motorista
+      if (myIds.includes(c.solicitante?.id ?? "")) return false;
+
+      // 2. Filtro de pesquisa de rota no input
+      if (
+        routeIdSearch &&
+        !c.routeId?.toLowerCase().includes(routeIdSearch.toLowerCase())
+      )
+        return false;
+
+      // 3. Isolamento por Cidade (Parsing inteligente)
+      if (!driver?.hub) return true;
+      const driverCity =
+        driver.hub.split("_")[2]?.trim().toLowerCase() ||
+        driver.hub.toLowerCase();
+      const callCity = c.hub
+        ? c.hub.split("_")[2]?.trim().toLowerCase() || c.hub.toLowerCase()
+        : "";
+
+      return driverCity === callCity;
+    });
+  }, [openSupportCalls, routeIdSearch, myIds, driver?.hub]);
+
   const rankedDrivers = useMemo(() => {
     return [...allDrivers]
       .filter((d) => (d as any).completedSupports > 0)
@@ -1421,6 +1658,8 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     callId: string,
     driverUid: string,
     ratingValue: number,
+    categories?: { atendimento: number; agilidade: number; educacao: number },
+    ratingKey?: string,
   ) => {
     if (!driverUid)
       return showNotification("error", "Erro", "Motorista não encontrado.");
@@ -1442,16 +1681,32 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
         const currentCount = data.ratingCount || 0;
         const newCount = currentCount + 1;
         const newAvg = (currentAvg * currentCount + ratingValue) / newCount;
-        transaction.update(driverDocRef, {
+        const driverUpdates: Record<string, any> = {
           ratingAverage: newAvg,
           ratingCount: newCount,
-        });
-        transaction.update(callDocRef, { rating: ratingValue });
+        };
+        if (categories) {
+          const prevAtend = data.ratingAtendimentoAvg || ratingValue;
+          const prevAgil = data.ratingAgilidadeAvg || ratingValue;
+          const prevEduc = data.ratingEducacaoAvg || ratingValue;
+          const prevCnt = data.ratingCount || 0;
+          driverUpdates.ratingAtendimentoAvg =
+            (prevAtend * prevCnt + categories.atendimento) / newCount;
+          driverUpdates.ratingAgilidadeAvg =
+            (prevAgil * prevCnt + categories.agilidade) / newCount;
+          driverUpdates.ratingEducacaoAvg =
+            (prevEduc * prevCnt + categories.educacao) / newCount;
+        }
+        transaction.update(driverDocRef, driverUpdates);
+        const callUpdate: Record<string, any> = { rating: ratingValue };
+        if (ratingKey)
+          callUpdate[ratingKey] = { ...categories, avg: ratingValue };
+        transaction.update(callDocRef, callUpdate);
       });
       showNotification(
         "success",
         "Avaliado!",
-        `Você deu ${ratingValue} estrelas.`,
+        `Avaliação enviada com sucesso.`,
       );
     } catch (error: any) {
       showNotification(
@@ -2119,7 +2374,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                       <Lottie
                         animationData={bgAnimation}
                         loop={true}
-                        // A chave para o efeito "cover" é esta prop rendererSettings:
                         rendererSettings={{
                           preserveAspectRatio: "xMidYMid slice",
                         }}
@@ -2281,7 +2535,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     </button>
                   ))}
                 </div>
-                {/* CALENDARIOS (MANTIDOS ORIGINAIS) */}
+                {/* CALENDARIOS */}
                 <div className="flex gap-2 mb-2 flex-wrap items-center">
                   <Popover>
                     <PopoverTrigger asChild>
@@ -2939,6 +3193,117 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     </button>
                   </div>
                 </section>
+
+                {/* Avaliações Recebidas */}
+                {(driver as any).ratingCount > 0 && (
+                  <section
+                    className={cn(
+                      "rounded-[1.5rem] p-5 space-y-4 border",
+                      theme === "dark"
+                        ? "bg-slate-900/40 border-orange-500/30 backdrop-blur-sm"
+                        : "bg-white/80 border-orange-200/50",
+                    )}
+                    style={
+                      theme === "dark"
+                        ? {
+                            boxShadow:
+                              "0 25px 50px -12px rgba(254, 95, 47, 0.3), inset 0 1px 0 0 rgba(254, 95, 47, 0.1)",
+                          }
+                        : {
+                            boxShadow:
+                              "0 25px 50px -12px rgba(254, 95, 47, 0.15)",
+                          }
+                    }
+                  >
+                    <h4
+                      className={cn(
+                        "text-xs font-bold uppercase mb-2 tracking-wide",
+                        theme === "dark" ? "text-orange-300" : "text-slate-600",
+                      )}
+                    >
+                      Minhas Avaliações
+                    </h4>
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span
+                          className={cn(
+                            "text-xs font-bold",
+                            theme === "dark" ? "text-white" : "text-slate-800",
+                          )}
+                        >
+                          Média Geral
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <StarRating
+                            rating={Math.round(
+                              (driver as any).ratingAverage || 0,
+                            )}
+                            readOnly
+                          />
+                          <span
+                            className={cn(
+                              "text-xs font-mono font-bold",
+                              theme === "dark"
+                                ? "text-yellow-300"
+                                : "text-yellow-700",
+                            )}
+                          >
+                            {((driver as any).ratingAverage || 0).toFixed(1)}
+                          </span>
+                        </div>
+                      </div>
+                      {[
+                        { label: "Atendimento", key: "ratingAtendimentoAvg" },
+                        { label: "Agilidade", key: "ratingAgilidadeAvg" },
+                        {
+                          label: "Educação e Respeito",
+                          key: "ratingEducacaoAvg",
+                        },
+                      ].map(({ label, key }) => {
+                        const val = (driver as any)[key];
+                        if (!val) return null;
+                        return (
+                          <div
+                            key={key}
+                            className="flex items-center justify-between"
+                          >
+                            <span
+                              className={cn(
+                                "text-[11px] font-medium",
+                                theme === "dark"
+                                  ? "text-white/70"
+                                  : "text-slate-600",
+                              )}
+                            >
+                              {label}
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <StarRating rating={Math.round(val)} readOnly />
+                              <span
+                                className={cn(
+                                  "text-[11px] font-mono",
+                                  theme === "dark"
+                                    ? "text-yellow-300"
+                                    : "text-yellow-700",
+                                )}
+                              >
+                                {val.toFixed(1)}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      <p
+                        className={cn(
+                          "text-[10px] text-right",
+                          theme === "dark" ? "text-white/40" : "text-slate-400",
+                        )}
+                      >
+                        Baseado em {(driver as any).ratingCount || 0} avaliações
+                      </p>
+                    </div>
+                  </section>
+                )}
               </div>
             )}
           </div>

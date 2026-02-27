@@ -38,6 +38,7 @@ import {
   Settings2,
   GripVertical,
   AlertOctagon,
+  Zap,
   Sun,
   Moon,
   HelpCircle,
@@ -47,14 +48,9 @@ import {
   UserCircle,
   Camera,
   Save,
-  Mail,
-  Linkedin,
-  MessageCircle,
-  Briefcase,
-  FileText,
-  Home,
-  Hash,
   Palette,
+  Star,
+  LogOut,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -65,6 +61,7 @@ import {
   deleteField,
   getDoc,
   setDoc,
+  serverTimestamp,
 } from "firebase/firestore";
 import { db, auth, storage } from "../firebase";
 import { onAuthStateChanged } from "firebase/auth";
@@ -757,7 +754,7 @@ const CallDetailsModal = ({
               <Button
                 variant="default"
                 size="sm"
-                className="bg-purple-600 hover:bg-purple-700"
+                className="bg-purple-600 hover:bg-purple-700 text-white"
                 onClick={() =>
                   onUpdateStatus(call.id, { status: "AGUARDANDO_APROVACAO" })
                 }
@@ -838,6 +835,8 @@ const CallCard = ({
     ? getDriverId(drivers, call.solicitante.id)
     : call.solicitante.id.slice(-4).toUpperCase();
 
+  const requesterFull = drivers?.find((d) => d.uid === call.solicitante.id);
+
   const urgencyColor =
     {
       BAIXA: "border-l-blue-400",
@@ -871,10 +870,19 @@ const CallCard = ({
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 overflow-hidden">
           <div className="w-1.5 h-1.5 rounded-full bg-primary/50 shrink-0"></div>
+
           <span className="text-sm font-semibold text-foreground truncate leading-none">
             {call.solicitante.name}
           </span>
+
+          {requesterFull && (requesterFull as any)?.ratingAverage && (
+            <div className="flex items-center gap-0.5 text-[10px] font-bold text-yellow-500 bg-yellow-500/10 px-1.5 py-0.5 rounded border border-yellow-500/20 shrink-0">
+              <Star size={10} fill="currentColor" />
+              {((requesterFull as any)?.ratingAverage).toFixed(1)}
+            </div>
+          )}
         </div>
+
         <span className="text-[10px] font-mono text-muted-foreground bg-muted px-1 rounded shrink-0 border border-border/50">
           {driverId}
         </span>
@@ -964,20 +972,24 @@ const CallCard = ({
   );
 };
 
-const ApprovalCard = ({
+// Componente ApprovalCard movido para ser utilizado internamente
+const ApprovalCardComponent = ({
   call,
   onApprove,
   onReject,
   onDelete,
+  onFinishManual,
   drivers,
 }: {
   call: SupportCall;
   onApprove: (call: SupportCall) => void;
   onReject: (call: SupportCall) => void;
   onDelete: (call: SupportCall) => void;
+  onFinishManual: (call: SupportCall) => void;
   drivers: Driver[];
 }) => {
   const assignedDriver = drivers.find((d) => d.uid === call.assignedTo);
+  const requesterDriver = drivers.find((d) => d.uid === call.solicitante.id);
   const driverId = getDriverId(drivers, call.solicitante.id);
   const providerId = assignedDriver
     ? getDriverId(drivers, assignedDriver.uid)
@@ -990,9 +1002,15 @@ const ApprovalCard = ({
           <div className="flex items-center space-x-3">
             <AvatarComponent user={call.solicitante} />
             <div>
-              <p className="font-bold text-foreground">
-                {call.solicitante.name}
-              </p>
+              <div className="flex items-center gap-2">
+                <p className="font-bold text-foreground">
+                  {call.solicitante.name}
+                </p>
+                <div className="flex items-center gap-0.5 text-[10px] font-bold text-yellow-500 bg-yellow-500/10 px-1.5 py-0.5 rounded border border-yellow-500/20">
+                  <Star size={10} fill="currentColor" />
+                  {((requesterDriver as any)?.ratingAverage || 5.0).toFixed(1)}
+                </div>
+              </div>
               <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                 <span>Solicitante</span>
                 <span className="text-[10px] font-mono bg-background/50 px-1 rounded border border-border/50">
@@ -1021,9 +1039,15 @@ const ApprovalCard = ({
             <div className="flex items-center gap-3">
               <AvatarComponent user={assignedDriver} />
               <div>
-                <p className="font-semibold text-foreground">
-                  {assignedDriver.name}
-                </p>
+                <div className="flex items-center gap-2">
+                  <p className="font-semibold text-foreground">
+                    {assignedDriver.name}
+                  </p>
+                  <div className="flex items-center gap-0.5 text-[10px] font-bold text-yellow-500 bg-yellow-500/10 px-1.5 py-0.5 rounded border border-yellow-500/20">
+                    <Star size={10} fill="currentColor" />
+                    {((assignedDriver as any).ratingAverage || 5.0).toFixed(1)}
+                  </div>
+                </div>
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <span>Prestador</span>
                   <span className="text-[10px] font-mono bg-background/50 px-1 rounded border border-border/50">
@@ -1061,7 +1085,6 @@ const ApprovalCard = ({
             </span>
           </div>
         )}
-
         <DescriptionParser description={call.description} />
       </CardContent>
 
@@ -1083,14 +1106,41 @@ const ApprovalCard = ({
         >
           <X size={16} className="mr-1.5" /> Rejeitar
         </Button>
-        <Button
-          onClick={() => onApprove(call)}
-          variant="default"
-          size="sm"
-          className="bg-green-600 hover:bg-green-700 rounded-lg"
-        >
-          <CheckCircle size={16} className="mr-1.5" /> Aprovar
-        </Button>
+        {call.status === "APROVADO_PELO_ADMIN" ? (
+          <Button
+            onClick={() => {
+              if (
+                window.confirm(
+                  "Deseja concluir este apoio manualmente? Isso finalizará o chamado para ambos os motoristas.",
+                )
+              ) {
+                onFinishManual(call);
+              }
+            }}
+            variant="default"
+            size="sm"
+            className="bg-green-600 hover:bg-green-700 text-white rounded-lg animate-pulse"
+          >
+            <Zap size={16} className="mr-1.5" /> Concluir Manualmente
+          </Button>
+        ) : (
+          <Button
+            onClick={() => {
+              if (
+                window.confirm(
+                  "Deseja aprovar este apoio? Isso liberará o campo de PIN para os motoristas finalizarem.",
+                )
+              ) {
+                onApprove(call);
+              }
+            }}
+            variant="default"
+            size="sm"
+            className="bg-primary hover:bg-primary/90 text-white rounded-lg"
+          >
+            <CheckCircle size={16} className="mr-1.5" /> Aprovar Apoio
+          </Button>
+        )}
       </CardFooter>
     </Card>
   );
@@ -1492,7 +1542,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     );
   };
 
-  const updateDriver = async (
+  const updateDriverStatus = async (
     driverUid: string,
     updates: Partial<Omit<Driver, "uid">>,
   ) => {
@@ -1528,8 +1578,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
     showNotification(
       "info",
+      "info",
       newMutedState ? "Silenciado" : "Som Ativado",
-      newMutedState ? "Notificações silenciadas." : "Alertas sonoros ativos.",
     );
   };
 
@@ -1630,17 +1680,47 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     });
   }, [calls, isMuted]);
 
+  // ✅ LOGICA CORRIGIDA: Somente altera para status intermediário
   const handleApprove = async (call: SupportCall) => {
     try {
-      const updates = { status: "CONCLUIDO", approvedBy: "Admin" };
+      const updates = {
+        status: "APROVADO_PELO_ADMIN",
+        approvedAt: serverTimestamp(),
+        approvedBy: "Admin",
+      };
       await updateCall(call.id, updates as any);
-      if (call.solicitante.id)
-        await updateDriver(call.solicitante.id, { status: "DISPONIVEL" });
-      if (call.assignedTo)
-        await updateDriver(call.assignedTo, { status: "DISPONIVEL" });
-      showNotification("success", "Aprovado", "Chamado concluído com sucesso.");
+      showNotification(
+        "success",
+        "Aprovado",
+        "O chamado foi aprovado. O campo de PIN está liberado para os motoristas.",
+      );
     } catch (error) {
       showNotification("error", "Erro", "Falha ao aprovar.");
+    }
+  };
+
+  // ✅ CONCLUSÃO MANUAL TOTAL (Botão Verde)
+  const handleFinishManual = async (call: SupportCall) => {
+    try {
+      const updates = {
+        status: "CONCLUIDO",
+        finishedAt: serverTimestamp(),
+        approvedBy: "Admin",
+      };
+      await updateCall(call.id, updates as any);
+
+      if (call.solicitante.id)
+        await updateDriverStatus(call.solicitante.id, { status: "DISPONIVEL" });
+      if (call.assignedTo)
+        await updateDriverStatus(call.assignedTo, { status: "DISPONIVEL" });
+
+      showNotification(
+        "success",
+        "Finalizado",
+        "Chamado encerrado manualmente pelo Admin.",
+      );
+    } catch (error) {
+      showNotification("error", "Erro", "Falha ao concluir manualmente.");
     }
   };
 
@@ -1693,12 +1773,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
     } catch (error) {
       if (isGod) {
-        console.error("Log Técnico SuperAdmin:", error);
-        showNotification(
-          "error",
-          "Erro de Sincronia",
-          "Falha na comunicação com o MongoDB/Firebase.",
-        );
+        showNotification("error", "Erro de Sincronia", "Falha na comunicação.");
       }
     } finally {
       closeModal();
@@ -1710,17 +1785,36 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     showNotification("success", "Restaurado", "Chamado voltou para Abertos.");
   };
 
-  const filteredCalls = useMemo(() => calls, [calls]);
+  // ✅ FILTRAGEM GLOBAL BLINDADA (Isolamento de Cidade/Franquia)
+  const filteredCallsMemo = useMemo(() => {
+    const selectedHub = adminProfile.hub;
+    // Se não tem hub no perfil ou escolheu "Todos", libera acesso global
+    if (!selectedHub || selectedHub.toLowerCase().includes("todos")) {
+      return calls;
+    }
+
+    return calls.filter((c) => {
+      if (!c.hub) return false;
+      // Extrai a cidade limpa pelo índice 2 (Ex: "LM Hub_PR_Londrina_Sul" -> "Londrina")
+      const callCity =
+        c.hub.split("_")[2]?.trim().toLowerCase() || c.hub.toLowerCase();
+      const adminCity =
+        selectedHub.split("_")[2]?.trim().toLowerCase() ||
+        selectedHub.toLowerCase();
+
+      return callCity === adminCity;
+    });
+  }, [calls, adminProfile.hub]);
   const activeCalls = useMemo(
     () =>
-      filteredCalls.filter(
+      filteredCallsMemo.filter(
         (c) => !["EXCLUIDO", "ARQUIVADO"].includes(c.status),
       ),
-    [filteredCalls],
+    [filteredCallsMemo],
   );
   const excludedCalls = useMemo(
-    () => filteredCalls.filter((c) => c.status === "EXCLUIDO"),
-    [filteredCalls],
+    () => filteredCallsMemo.filter((c) => c.status === "EXCLUIDO"),
+    [filteredCallsMemo],
   );
 
   const openCalls = useMemo(
@@ -1731,8 +1825,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     () => activeCalls.filter((c) => c.status === "EM ANDAMENTO"),
     [activeCalls],
   );
+
+  // ✅ ATUALIZADO: Filtra AGUARDANDO_APROVACAO e APROVADO_PELO_ADMIN
   const pendingApprovalCalls = useMemo(
-    () => activeCalls.filter((c) => c.status === "AGUARDANDO_APROVACAO"),
+    () =>
+      activeCalls.filter(
+        (c) =>
+          c.status === "AGUARDANDO_APROVACAO" ||
+          c.status === "APROVADO_PELO_ADMIN",
+      ),
     [activeCalls],
   );
   const devolutionCalls = useMemo(
@@ -1744,7 +1845,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     [activeCalls],
   );
 
-  const filteredDrivers = useMemo(() => drivers, [drivers]);
+  const filteredDrivers = useMemo(() => {
+    const selectedHub = adminProfile.hub;
+    if (!selectedHub || selectedHub.toLowerCase().includes("todos")) {
+      return drivers;
+    }
+
+    return drivers.filter((d) => {
+      if (!d.hub) return false;
+      const driverCity =
+        d.hub.split("_")[2]?.trim().toLowerCase() || d.hub.toLowerCase();
+      const adminCity =
+        selectedHub.split("_")[2]?.trim().toLowerCase() ||
+        selectedHub.toLowerCase();
+
+      return driverCity === adminCity;
+    });
+  }, [drivers, adminProfile.hub]);
   const availableDrivers = useMemo(
     () =>
       filteredDrivers.filter((d) => {
@@ -1782,7 +1899,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   );
 
   const filteredHistoryCalls = useMemo(() => {
-    return filteredCalls
+    return filteredCallsMemo
       .filter((call) => {
         if (call.status === "EXCLUIDO") return false;
         if (
@@ -1835,7 +1952,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             : (b.timestamp as any)?.seconds * 1000 || 0;
         return timeB - timeA;
       });
-  }, [filteredCalls, appliedHistoryFilters]);
+  }, [filteredCallsMemo, appliedHistoryFilters]);
 
   const allHubs = useMemo(
     () =>
@@ -1853,7 +1970,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       ].sort(),
     [drivers],
   );
-  const vehicleTypes = useMemo(
+  const vehicleTypesOptions = useMemo(
     () =>
       [
         "Todos os Veículos",
@@ -1904,7 +2021,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         icon={Building}
       />
       <SearchableSelect
-        options={vehicleTypes}
+        options={vehicleTypesOptions}
         value={driverVehicleFilter}
         onChange={setDriverVehicleFilter}
         placeholder="Filtrar por Veículo..."
@@ -1913,11 +2030,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     </div>
   );
 
-  const activeCallForDriver = infoModalDriver
+  const activeCallForDriverModal = infoModalDriver
     ? calls.find(
         (c) =>
           c.assignedTo === infoModalDriver.uid &&
-          (c.status === "EM ANDAMENTO" || c.status === "AGUARDANDO_APROVACAO"),
+          (c.status === "EM ANDAMENTO" ||
+            c.status === "AGUARDANDO_APROVACAO" ||
+            c.status === "APROVADO_PELO_ADMIN"),
       ) || null
     : null;
 
@@ -1967,12 +2086,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           colorClass="#8B5CF6"
         >
           {data.map((call) => (
-            <ApprovalCard
+            <ApprovalCardComponent
               key={call.id}
               call={call}
               onApprove={handleApprove}
               onReject={handleReject}
               onDelete={handleDeleteClick}
+              onFinishManual={handleFinishManual}
               drivers={drivers}
             />
           ))}
@@ -2223,6 +2343,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 aria-label="Alternar tema"
               >
                 {theme === "light" ? <Moon size={20} /> : <Sun size={20} />}
+              </button>
+              <button
+                onClick={() => auth.signOut()}
+                className="w-10 h-10 rounded-xl flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-all"
+                aria-label="Sair"
+              >
+                <LogOut size={20} />
               </button>
             </div>
           </header>
@@ -3059,7 +3186,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {infoModalDriver && (
           <DriverInfoModal
             driver={infoModalDriver}
-            call={activeCallForDriver}
+            call={activeCallForDriverModal}
             onClose={() => setInfoModalDriver(null)}
           />
         )}
@@ -3081,7 +3208,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           title="Confirmar"
           confirmText="Sim"
         >
-          Confirmar ação?
+          {confirmationType === "soft-delete"
+            ? "Mover para lixeira?"
+            : confirmationType === "permanent-delete"
+              ? "Excluir permanentemente?"
+              : "Esvaziar lixeira?"}
         </ConfirmationModal>
       </div>
     </TooltipProvider>

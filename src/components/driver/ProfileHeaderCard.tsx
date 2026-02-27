@@ -1,5 +1,5 @@
 import React from "react";
-import { Building, Truck, Phone, Camera, Clock } from "lucide-react";
+import { Building, Truck, Phone, Camera, Clock, Star } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { formatPhoneNumber } from "../../utils/formatting";
 import { Loading } from "../ui/loading";
@@ -99,20 +99,17 @@ export const ProfileHeaderCard: React.FC<ProfileHeaderCardProps> = ({
     "linear-gradient(135deg, #FFA832 0%, #FE8330 50%, #FE5F2F 100%)";
   const shopeeGradientDark =
     "linear-gradient(135deg, #FE5F2F 0%, #FD3A2D 50%, #EE4D2D 100%)";
-  // Ajuste do background dark para ser coerente com o resto da UI
   const shopeeBackgroundLight =
     "linear-gradient(135deg, #FFF5F0 0%, #FFE8E0 50%, #FFDBD0 100%)";
   const shopeeBackgroundDark =
-    "linear-gradient(180deg, #1c1917 0%, #29120a 100%)"; // Fundo "Warm Dark" sólido/gradiente sutil
+    "linear-gradient(180deg, #1c1917 0%, #29120a 100%)";
 
   return (
     <div className="mb-8">
       <div
         className={cn(
           "relative overflow-hidden rounded-3xl border-2 shadow-2xl transition-all duration-500",
-          theme === "dark"
-            ? "border-orange-500/20" // Borda mais sutil no dark
-            : "border-orange-300/60",
+          theme === "dark" ? "border-orange-500/20" : "border-orange-300/60",
         )}
         style={{
           background:
@@ -149,59 +146,12 @@ export const ProfileHeaderCard: React.FC<ProfileHeaderCardProps> = ({
 
         {/* Conteúdo */}
         <div className="relative z-10 p-6 md:p-8">
-          {/* Header com hora e nome */}
-          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-6 pb-6 border-b border-orange-500/20">
-            {/* Data e Hora */}
-            <div className="flex items-center gap-3">
+          {/* Header Responsivo: Tudo alinhado à esquerda */}
+          <div className="flex flex-col items-start gap-6 mb-6 pb-6 border-b border-orange-500/20">
+            {/* 1. Nome do Motorista e Foto */}
+            <div className="flex items-center gap-4 w-full">
               <div
-                className="p-3 rounded-xl"
-                style={{
-                  background:
-                    theme === "dark"
-                      ? "rgba(254, 95, 47, 0.1)"
-                      : "rgba(255, 168, 50, 0.2)",
-                  backdropFilter: "blur(10px)",
-                }}
-              >
-                <Clock
-                  size={24}
-                  className={
-                    theme === "dark" ? "text-orange-400" : "text-orange-600"
-                  }
-                />
-              </div>
-              <div className="flex flex-col">
-                <span
-                  className={cn(
-                    "text-2xl md:text-3xl font-bold tracking-tight",
-                    theme === "dark" ? "text-white" : "text-slate-900",
-                  )}
-                  style={{
-                    textShadow:
-                      theme === "dark"
-                        ? "0 2px 10px rgba(0, 0, 0, 0.5)"
-                        : "none",
-                  }}
-                >
-                  {format(currentDateTime, "HH:mm:ss", { locale: ptBR })}
-                </span>
-                <span
-                  className={cn(
-                    "text-sm md:text-base mt-1",
-                    theme === "dark" ? "text-slate-400" : "text-slate-600",
-                  )}
-                >
-                  {format(currentDateTime, "EEEE, dd 'de' MMMM 'de' yyyy", {
-                    locale: ptBR,
-                  })}
-                </span>
-              </div>
-            </div>
-
-            {/* Nome do Motorista */}
-            <div className="flex items-center gap-3">
-              <div
-                className="relative overflow-hidden rounded-2xl group cursor-pointer transition-transform duration-300 hover:scale-105"
+                className="relative overflow-hidden rounded-2xl group cursor-pointer transition-transform duration-300 hover:scale-105 shrink-0"
                 style={{
                   background:
                     theme === "dark" ? shopeeGradientDark : shopeeGradientLight,
@@ -221,11 +171,13 @@ export const ProfileHeaderCard: React.FC<ProfileHeaderCardProps> = ({
                   <div className="w-full h-full flex items-center justify-center">
                     <span className="text-2xl font-bold text-white">
                       {driver.name
-                        .split(" ")
-                        .map((n) => n[0])
-                        .join("")
-                        .toUpperCase()
-                        .slice(0, 2)}
+                        ? driver.name
+                            .split(" ")
+                            .map((n) => n[0])
+                            .join("")
+                            .toUpperCase()
+                            .slice(0, 2)
+                        : "M"}
                     </span>
                   </div>
                 )}
@@ -240,13 +192,11 @@ export const ProfileHeaderCard: React.FC<ProfileHeaderCardProps> = ({
                     <Loading size="sm" variant="spinner" />
                   </div>
                 )}
-                {/* Ponto de status */}
+                {/* Ponto de status na foto */}
                 <div
                   className={cn(
                     "absolute -bottom-1 -right-1 w-7 h-7 rounded-full border-4 shadow-lg",
-                    theme === "dark"
-                      ? "border-[#1c1917]" // Borda combinando com o fundo do card
-                      : "border-white",
+                    theme === "dark" ? "border-[#1c1917]" : "border-white",
                     statusColor,
                   )}
                   style={{
@@ -258,10 +208,11 @@ export const ProfileHeaderCard: React.FC<ProfileHeaderCardProps> = ({
                   }}
                 />
               </div>
-              <div className="flex flex-col">
+
+              <div className="flex flex-col min-w-0">
                 <h2
                   className={cn(
-                    "text-2xl md:text-3xl font-bold mb-1",
+                    "text-2xl md:text-3xl font-bold truncate mb-1.5",
                     theme === "dark" ? "text-white" : "text-slate-900",
                   )}
                   style={{
@@ -306,16 +257,80 @@ export const ProfileHeaderCard: React.FC<ProfileHeaderCardProps> = ({
                 </div>
               </div>
             </div>
+
+            {/* 2. NOTA DE AVALIAÇÃO - Design Horizontal Elegante */}
+            <div className="flex items-center gap-4 bg-yellow-500/10 px-5 py-3 rounded-2xl border border-yellow-500/30 shadow-sm w-fit transition-all hover:scale-105">
+              <span
+                className={cn(
+                  "text-xs font-bold uppercase tracking-widest",
+                  theme === "dark" ? "text-yellow-400" : "text-yellow-600",
+                )}
+              >
+                Sua Nota
+              </span>
+              <div className="w-px h-6 bg-yellow-500/30"></div>
+              <div className="flex items-center gap-1.5 text-yellow-500 text-2xl font-black drop-shadow-md">
+                <Star size={24} fill="currentColor" />
+                {((driver as any)?.ratingAverage || 0).toFixed(1)}
+              </div>
+            </div>
+
+            {/* 3. Data e Hora */}
+            <div className="flex items-center gap-3">
+              <div
+                className="p-3 rounded-xl"
+                style={{
+                  background:
+                    theme === "dark"
+                      ? "rgba(254, 95, 47, 0.1)"
+                      : "rgba(255, 168, 50, 0.2)",
+                  backdropFilter: "blur(10px)",
+                }}
+              >
+                <Clock
+                  size={24}
+                  className={
+                    theme === "dark" ? "text-orange-400" : "text-orange-600"
+                  }
+                />
+              </div>
+              <div className="flex flex-col">
+                <span
+                  className={cn(
+                    "text-xl md:text-2xl font-bold tracking-tight",
+                    theme === "dark" ? "text-white" : "text-slate-900",
+                  )}
+                  style={{
+                    textShadow:
+                      theme === "dark"
+                        ? "0 2px 10px rgba(0, 0, 0, 0.5)"
+                        : "none",
+                  }}
+                >
+                  {format(currentDateTime, "HH:mm:ss", { locale: ptBR })}
+                </span>
+                <span
+                  className={cn(
+                    "text-sm mt-0.5",
+                    theme === "dark" ? "text-slate-400" : "text-slate-600",
+                  )}
+                >
+                  {format(currentDateTime, "EEEE, dd 'de' MMMM 'de' yyyy", {
+                    locale: ptBR,
+                  })}
+                </span>
+              </div>
+            </div>
           </div>
 
-          {/* Informações do Motorista */}
+          {/* Informações do Motorista (Cards Inferiores) */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
             {/* Hub/Localização */}
             <div
               className={cn(
                 "flex items-center gap-3 p-4 rounded-xl border-2 transition-all duration-300",
                 theme === "dark"
-                  ? "bg-black/20 border-white/5 hover:bg-black/30" // Card interno escuro
+                  ? "bg-black/20 border-white/5 hover:bg-black/30"
                   : "bg-white/80 border-orange-300/50",
               )}
               style={{

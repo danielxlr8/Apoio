@@ -6,6 +6,7 @@ import {
   X,
   CheckCircle,
   Phone,
+  Zap,
 } from "lucide-react";
 import type { SupportCall, Driver } from "../../types/logistics";
 import { AvatarComponent, UrgencyBadge } from "../UI";
@@ -18,6 +19,7 @@ interface ApprovalCardProps {
   onReject: (call: SupportCall) => void;
   onDelete: (call: SupportCall) => void;
   onContact: (phone?: string) => void;
+  onFinishManual: (call: SupportCall) => void;
   drivers: Driver[];
 }
 
@@ -27,6 +29,7 @@ export const ApprovalCard = ({
   onReject,
   onDelete,
   onContact,
+  onFinishManual,
   drivers,
 }: ApprovalCardProps) => {
   const assignedDriver = call.assignedTo
@@ -34,7 +37,7 @@ export const ApprovalCard = ({
         (d) =>
           d.uid === call.assignedTo ||
           d.googleUid === call.assignedTo ||
-          d.shopeeId === call.assignedTo
+          d.shopeeId === call.assignedTo,
       )
     : null;
 
@@ -67,7 +70,9 @@ export const ApprovalCard = ({
               className="w-8 h-8 rounded-full text-green-500 hover:bg-green-500/10 hover:text-green-600"
               onClick={(e) => {
                 e.stopPropagation();
-                onContact(call.solicitante.phone);
+                if (call.solicitante.phone) {
+                  onContact(call.solicitante.phone);
+                }
               }}
             >
               <Phone size={16} />
@@ -95,7 +100,9 @@ export const ApprovalCard = ({
               className="w-8 h-8 rounded-full text-green-500 hover:bg-green-500/10 hover:text-green-600"
               onClick={(e) => {
                 e.stopPropagation();
-                onContact(assignedDriver.phone);
+                if (assignedDriver.phone) {
+                  onContact(assignedDriver.phone);
+                }
               }}
             >
               <Phone size={16} />
@@ -138,14 +145,43 @@ export const ApprovalCard = ({
         >
           <X size={16} className="mr-1.5" /> Rejeitar
         </Button>
-        <Button
-          onClick={() => onApprove(call)}
-          variant="default"
-          size="sm"
-          className="bg-green-600 hover:bg-green-700 rounded-lg"
-        >
-          <CheckCircle size={16} className="mr-1.5" /> Aprovar
-        </Button>
+
+        {/* ✅ MÁQUINA DE ESTADOS DO ADMIN COM CONFIRMAÇÕES */}
+        {call.status === "APROVADO_PELO_ADMIN" ? (
+          <Button
+            onClick={() => {
+              if (
+                window.confirm(
+                  "Deseja finalizar esta solicitação e enviar para o histórico de concluídos?",
+                )
+              ) {
+                onFinishManual(call);
+              }
+            }}
+            variant="default"
+            size="sm"
+            className="bg-green-600 hover:bg-green-700 rounded-lg animate-pulse shadow-lg text-white"
+          >
+            <Zap size={16} className="mr-1.5" /> Concluir
+          </Button>
+        ) : (
+          <Button
+            onClick={() => {
+              if (
+                window.confirm(
+                  "Deseja aprovar e liberar a conclusão/PIN para os motoristas?",
+                )
+              ) {
+                onApprove(call);
+              }
+            }}
+            variant="default"
+            size="sm"
+            className="bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg"
+          >
+            <CheckCircle size={16} className="mr-1.5" /> Aprovar
+          </Button>
+        )}
       </CardFooter>
     </Card>
   );
