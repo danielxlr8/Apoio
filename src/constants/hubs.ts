@@ -4,6 +4,7 @@ export const HUBS = [
   "LM Hub_PR_Foz do Iguaçu",
   "LM Hub_PR_Cascavel",
   "LM Hub_PR_Curitiba",
+  "LM Hub_PR_São José dos Pinhais",
 ] as const;
 
 export type Hub = (typeof HUBS)[number];

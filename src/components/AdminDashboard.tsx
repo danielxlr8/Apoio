@@ -1681,28 +1681,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   }, [calls, isMuted]);
 
   // ✅ LOGICA CORRIGIDA: Somente altera para status intermediário
-  // ✅ LOGICA DE APROVAÇÃO BLINDADA
   const handleApprove = async (call: SupportCall) => {
     try {
-      // Enviamos APENAS o status para evitar bloqueios de segurança nas regras do Firestore
       const updates = {
-        status: "APROVADO_PELO_ADMIN"
+        status: "APROVADO_PELO_ADMIN",
+        approvedAt: serverTimestamp(),
+        approvedBy: "Admin",
       };
-
       await updateCall(call.id, updates as any);
-
       showNotification(
         "success",
-        "Aprovado!",
-        "O PIN foi liberado para os motoristas com sucesso."
+        "Aprovado",
+        "O chamado foi aprovado. O campo de PIN está liberado para os motoristas.",
       );
-    } catch (error: any) {
-      console.error("Erro ao aprovar no Firebase:", error);
-      showNotification(
-        "error",
-        "Erro de Conexão",
-        "Falha ao aprovar: " + (error.message || "Verifique o console.")
-      );
+    } catch (error) {
+      showNotification("error", "Erro", "Falha ao aprovar.");
     }
   };
 
