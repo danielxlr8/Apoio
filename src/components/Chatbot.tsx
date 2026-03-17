@@ -155,7 +155,7 @@ export const Chatbot: React.FC = () => {
       const idToken = await user.getIdToken(true);
       const apiUrl = import.meta.env.VITE_API_URL;
 
-      const response = await fetch(`${apiUrl}/chat`, {
+      const response = await fetch(`${apiUrl}/api/chat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -611,7 +611,7 @@ export const Chatbot: React.FC = () => {
                     key={msg.id}
                     className={cn(
                       "flex items-start gap-3 w-full",
-                      msg.role === "user" ? "justify-end" : "justify-start"
+                      msg.role === "user" ? "justify-end" : "justify-start",
                     )}
                   >
                     {/* Avatar do Bot (só para o bot) */}
@@ -639,7 +639,7 @@ export const Chatbot: React.FC = () => {
                         "p-4 rounded-2xl max-w-[85%] shadow-lg",
                         msg.role === "user"
                           ? "rounded-br-none" // Balão laranja do utilizador
-                          : "rounded-tl-none" // Balão do bot
+                          : "rounded-tl-none", // Balão do bot
                       )}
                       style={
                         msg.role === "user"
@@ -661,7 +661,7 @@ export const Chatbot: React.FC = () => {
                           className={cn(
                             "text-sm font-medium leading-relaxed",
                             msg.role === "user" ? "text-white" : "text-white",
-                            msg.gifUrls && msg.gifUrls.length > 0 && "mb-3"
+                            msg.gifUrls && msg.gifUrls.length > 0 && "mb-3",
                           )}
                         >
                           {msg.parts[0].text}

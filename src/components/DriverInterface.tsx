@@ -1,5 +1,25 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import Joyride, {
+  Step,
+  CallBackProps,
+  STATUS,
+  EVENTS,
+  ACTIONS,
+} from "react-joyride";
+import Confetti from "react-confetti";
 import type { Driver, SupportCall, UrgencyLevel } from "../types/logistics";
+
+// --- IMPORT LOTTIE ---
+import Lottie from "lottie-react";
+
+import { MapContainer, TileLayer, Marker, Popup, Circle } from "react-leaflet";
+import "leaflet/dist/leaflet.css";
+import L from "leaflet";
+
+import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
+import markerIcon from "leaflet/dist/images/marker-icon.png";
+import markerShadow from "leaflet/dist/images/marker-shadow.png";
+
 import {
   Clock,
   AlertTriangle,
@@ -12,7 +32,6 @@ import {
   VolumeX,
   Calendar as CalendarIcon,
   Lock,
-  Navigation as NavigationIcon,
   History as HistoryIcon,
   Sun,
   Moon,
@@ -32,7 +51,11 @@ import {
   CalendarClock,
   Image as ImageIcon,
   Download,
-  X as XIcon,
+  Map as MapIcon,
+  Trophy,
+  Star,
+  Mic,
+  Smartphone,
 } from "lucide-react";
 import { auth, db, storage } from "../firebase";
 import {
@@ -50,6 +73,8 @@ import {
   getDocs,
   orderBy,
   addDoc,
+  GeoPoint,
+  runTransaction,
 } from "firebase/firestore";
 import {
   updatePassword,
@@ -62,6 +87,7 @@ import {
   getDownloadURL,
   deleteObject,
 } from "firebase/storage";
+import { increment } from "firebase/firestore";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
 import { cn } from "../lib/utils";
@@ -72,9 +98,9 @@ import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
-// Imports organizados
 import { ProfileHeaderCard, StatusSection } from "./driver";
 import { UrgencyBadge } from "./driver/components/UrgencyBadge";
+import { CustomTooltip } from "./driver/CustomTooltip";
 import { HUBS } from "../constants/hubs";
 import { VEHICLE_TYPES } from "../constants/vehicleTypes";
 import { SUPPORT_REASONS } from "../constants/supportReasons";
@@ -88,14 +114,203 @@ import { toast as sonnerToast } from "sonner";
 import { Loading, LoadingOverlay } from "./ui/loading";
 import { usePresence } from "../hooks/usePresence";
 
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "./ui/tooltip";
+import { Alert, AlertDescription } from "./ui/alert";
+
+// Correção Leaflet
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: markerIcon2x,
+  iconUrl: markerIcon,
+  shadowUrl: markerShadow,
+});
+
 interface DriverInterfaceProps {
   driver: Driver;
 }
 
 const sessionNotifiedCallIds = new Set<string>();
 
-// DriverCallHistoryCard será movido para ./driver/components/DriverCallHistoryCard.tsx
-// Mantendo temporariamente aqui até ser extraído completamente
+const getGenderAvatar = (name: string, gender?: string) => {
+  const seed = name || "User";
+  if (gender === "Mulher") {
+    return `https://avatar.iran.liara.run/public/girl?username=${seed}`;
+  }
+  return `https://avatar.iran.liara.run/public/boy?username=${seed}`;
+};
+
+const getMockCoordinates = (id: string) => {
+  const baseLat = -25.4284;
+  const baseLng = -49.2733;
+  const pseudoRandom = id
+    .split("")
+    .reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  const offsetLat = (pseudoRandom % 100) / 2000;
+  const offsetLng = (pseudoRandom % 100) / 2000;
+  return [baseLat + offsetLat, baseLng + offsetLng] as [number, number];
+};
+
+const generateSecurityCode = (): string => {
+  return Math.floor(1000 + Math.random() * 9000).toString();
+};
+
+const StarRating = ({
+  rating,
+  onRate,
+  readOnly = false,
+}: {
+  rating: number;
+  onRate?: (r: number) => void;
+  readOnly?: boolean;
+}) => {
+  const [hover, setHover] = useState(0);
+  return (
+    <div className="flex gap-1">
+      {[1, 2, 3, 4, 5].map((star) => (
+        <Star
+          key={star}
+          size={16}
+          className={cn(
+            "transition-colors",
+            readOnly ? "cursor-default" : "cursor-pointer",
+            (hover || rating) >= star
+              ? "fill-yellow-400 text-yellow-400"
+              : "text-gray-300",
+          )}
+          onMouseEnter={() => !readOnly && setHover(star)}
+          onMouseLeave={() => !readOnly && setHover(0)}
+          onClick={() => !readOnly && onRate && onRate(star)}
+        />
+      ))}
+    </div>
+  );
+};
+
+const RatingBlock = ({
+  call,
+  isRequester,
+  isDark,
+  onRateDriver,
+}: {
+  call: any;
+  isRequester: boolean;
+  isDark: boolean;
+  onRateDriver: (
+    callId: string,
+    targetUid: string,
+    avgRating: number,
+    categories: { atendimento: number; agilidade: number; educacao: number },
+    ratingKey: string,
+  ) => Promise<void>;
+}) => {
+  const myRatingKey = isRequester ? "ratingByRequester" : "ratingByProvider";
+  const alreadyRated = !!call[myRatingKey];
+  const ratedTarget = isRequester ? call.assignedTo : call.solicitante?.id;
+
+  const [atendimento, setAtendimento] = useState(0);
+  const [agilidade, setAgilidade] = useState(0);
+  const [educacao, setEducacao] = useState(0);
+  const [submitting, setSubmitting] = useState(false);
+
+  if (alreadyRated) {
+    return (
+      <div className="col-span-2 mt-2">
+        <div
+          className={cn(
+            "p-3 rounded-xl border text-center",
+            isDark
+              ? "bg-yellow-500/10 border-yellow-500/30"
+              : "bg-yellow-50 border-yellow-200",
+          )}
+        >
+          <span
+            className={cn(
+              "text-xs font-bold flex items-center justify-center gap-1",
+              isDark ? "text-yellow-300" : "text-yellow-700",
+            )}
+          >
+            <Star size={12} className="fill-yellow-400 text-yellow-400" />
+            Avaliação enviada
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  const categories = [
+    { label: "Atendimento", val: atendimento, set: setAtendimento },
+    { label: "Agilidade", val: agilidade, set: setAgilidade },
+    { label: "Educação e Respeito", val: educacao, set: setEducacao },
+  ];
+
+  const allFilled = atendimento > 0 && agilidade > 0 && educacao > 0;
+
+  return (
+    <div className="col-span-2 mt-2">
+      <div
+        className={cn(
+          "p-3 rounded-xl border space-y-3",
+          isDark
+            ? "bg-yellow-500/10 border-yellow-500/30"
+            : "bg-yellow-50 border-yellow-200",
+        )}
+      >
+        <p
+          className={cn(
+            "text-xs font-bold uppercase tracking-wide",
+            isDark ? "text-yellow-200" : "text-yellow-800",
+          )}
+        >
+          Avalie o apoio
+        </p>
+        {categories.map(({ label, val, set }) => (
+          <div key={label} className="flex items-center justify-between">
+            <span
+              className={cn(
+                "text-[11px] font-medium",
+                isDark ? "text-white/70" : "text-slate-600",
+              )}
+            >
+              {label}
+            </span>
+            <StarRating rating={val} onRate={(r) => set(r)} />
+          </div>
+        ))}
+        <button
+          disabled={submitting || !allFilled || !ratedTarget}
+          onClick={async () => {
+            if (!ratedTarget) return;
+            setSubmitting(true);
+            const avg = parseFloat(
+              ((atendimento + agilidade + educacao) / 3).toFixed(2),
+            );
+            await onRateDriver(
+              call.id,
+              ratedTarget,
+              avg,
+              { atendimento, agilidade, educacao },
+              myRatingKey,
+            );
+            setSubmitting(false);
+          }}
+          className={cn(
+            "w-full py-2 rounded-xl text-xs font-bold transition-all",
+            "bg-yellow-500 hover:bg-yellow-600 text-white shadow-md",
+            "disabled:opacity-40 disabled:cursor-not-allowed",
+          )}
+        >
+          {submitting ? "Enviando..." : "Enviar Avaliação"}
+        </button>
+      </div>
+    </div>
+  );
+};
+
 const DriverCallHistoryCard = ({
   call,
   userId,
@@ -104,18 +319,44 @@ const DriverCallHistoryCard = ({
   onRequestApproval,
   onCancelSupport,
   onDeleteSupportRequest,
+  onRateDriver,
 }: any) => {
-  const isRequester = call.solicitante.id === userId;
+  const isRequester =
+    call.solicitante?.id === driver?.uid || call.solicitante?.id === userId;
   const otherPartyId = isRequester ? call.assignedTo : call.solicitante.id;
   const otherParty = allDrivers.find((d: Driver) => d.uid === otherPartyId);
+  const solicitante = call.solicitante;
+  const prestador = call.prestador || null;
+
+  const solicitanteFull = allDrivers.find(
+    (d: Driver) => d.uid === solicitante.id,
+  );
+  const prestadorFull = prestador
+    ? allDrivers.find((d: Driver) => d.uid === prestador.id)
+    : null;
+
+  const [pin, setPin] = useState("");
+  const [showPinInput, setShowPinInput] = useState(false);
 
   const handleWhatsAppClick = () => {
     if (!otherParty?.phone)
       return showNotification("error", "Erro", "Telefone indisponível.");
     const msg = encodeURIComponent(
-      `Olá, sou ${driver.name} referente ao apoio logístico.`
+      `Olá, sou ${driver.name} referente ao apoio logístico.`,
     );
     window.open(`https://wa.me/55${otherParty.phone}?text=${msg}`, "_blank");
+  };
+
+  const handleVerifyAndFinish = () => {
+    if (pin === call.securityCode) {
+      onRequestApproval(call.id);
+    } else {
+      showNotification(
+        "error",
+        "PIN Incorreto",
+        "O código digitado não confere com o do solicitante.",
+      );
+    }
   };
 
   const isDark = document.documentElement.classList.contains("dark");
@@ -126,13 +367,13 @@ const DriverCallHistoryCard = ({
         "border border-border shadow-xl hover:shadow-2xl transition-all backdrop-blur-xl rounded-2xl overflow-hidden",
         isDark
           ? "bg-slate-800/90 border-slate-600/50 shadow-black/20 hover:shadow-black/30"
-          : "bg-white/80 border-orange-200/50 shadow-black/5 hover:shadow-black/10"
+          : "bg-white/80 border-orange-200/50 shadow-black/5 hover:shadow-black/10",
       )}
     >
       <div
         className={cn(
           "flex items-center justify-between p-4 border-b",
-          isDark ? "border-slate-600/50" : "border-orange-200/50"
+          isDark ? "border-slate-600/50" : "border-orange-200/50",
         )}
       >
         <div className="flex items-center gap-3">
@@ -141,7 +382,7 @@ const DriverCallHistoryCard = ({
               "p-2 rounded-xl backdrop-blur-sm shadow-lg shadow-black/10",
               isRequester
                 ? "bg-orange-500/20 dark:bg-orange-500/20 text-orange-700 dark:text-orange-300 border border-orange-400/30"
-                : "bg-orange-500/20 dark:bg-orange-500/20 text-orange-700 dark:text-orange-300 border border-orange-400/30"
+                : "bg-orange-500/20 dark:bg-orange-500/20 text-orange-700 dark:text-orange-300 border border-orange-400/30",
             )}
           >
             {isRequester ? <Package size={18} /> : <Truck size={18} />}
@@ -150,7 +391,7 @@ const DriverCallHistoryCard = ({
             <h3
               className={cn(
                 "text-sm font-bold",
-                isDark ? "text-white" : "text-slate-800"
+                isDark ? "text-white" : "text-slate-800",
               )}
             >
               {isRequester
@@ -160,7 +401,7 @@ const DriverCallHistoryCard = ({
             <p
               className={cn(
                 "text-xs flex items-center gap-1",
-                isDark ? "text-white/60" : "text-slate-600"
+                isDark ? "text-white/60" : "text-slate-600",
               )}
             >
               <CalendarClock size={12} /> {formatTimestamp(call.timestamp)}
@@ -172,10 +413,10 @@ const DriverCallHistoryCard = ({
           <p
             className={cn(
               "text-[10px] font-medium mt-1 uppercase tracking-wide",
-              isDark ? "text-white/50" : "text-slate-600"
+              isDark ? "text-white/50" : "text-slate-600",
             )}
           >
-            {call.status.replace("_", " ")}
+            {call.status.replace(/_/g, " ")}
           </p>
         </div>
       </div>
@@ -185,7 +426,7 @@ const DriverCallHistoryCard = ({
           <span
             className={cn(
               "text-[10px] uppercase font-bold block mb-0.5",
-              isDark ? "text-white/50" : "text-slate-600"
+              isDark ? "text-white/50" : "text-slate-600",
             )}
           >
             Rota ID
@@ -195,7 +436,7 @@ const DriverCallHistoryCard = ({
               "font-mono font-medium backdrop-blur-xl px-1.5 py-0.5 rounded-xl text-xs border",
               isDark
                 ? "text-white bg-orange-500/20 border-orange-500/30"
-                : "text-slate-800 bg-orange-50/80 border-orange-200/50"
+                : "text-slate-800 bg-orange-50/80 border-orange-200/50",
             )}
           >
             {call.routeId || "N/A"}
@@ -205,7 +446,7 @@ const DriverCallHistoryCard = ({
           <span
             className={cn(
               "text-[10px] uppercase font-bold block mb-0.5",
-              isDark ? "text-white/50" : "text-slate-600"
+              isDark ? "text-white/50" : "text-slate-600",
             )}
           >
             Pacotes
@@ -213,7 +454,7 @@ const DriverCallHistoryCard = ({
           <span
             className={cn(
               "font-medium",
-              isDark ? "text-white" : "text-slate-800"
+              isDark ? "text-white" : "text-slate-800",
             )}
           >
             {call.packageCount || 0} un.
@@ -222,8 +463,86 @@ const DriverCallHistoryCard = ({
         <div className="col-span-2">
           <span
             className={cn(
+              "text-[10px] uppercase font-bold block mb-1",
+              isDark ? "text-white/50" : "text-slate-600",
+            )}
+          >
+            Solicitante
+          </span>
+          <div className="flex items-center gap-2 p-2 rounded-xl bg-blue-500/10 border border-blue-500/30">
+            <User size={14} className="text-blue-600 dark:text-blue-400" />
+            <div className="flex-1">
+              <div className="flex items-center gap-2">
+                <p
+                  className={cn(
+                    "text-xs font-semibold",
+                    isDark ? "text-white" : "text-slate-800",
+                  )}
+                >
+                  {solicitante.name}
+                </p>
+                {/* ESTRELA RENDERIZADA SEMPRE (COM FALLBACK PARA 5.0) */}
+                <div className="flex items-center gap-0.5 text-[10px] font-bold text-yellow-500 bg-yellow-500/10 px-1.5 py-0.5 rounded border border-yellow-500/20">
+                  <Star size={10} fill="currentColor" />
+                  {((solicitanteFull as any)?.ratingAverage || 5.0).toFixed(1)}
+                </div>
+              </div>
+              <p
+                className={cn(
+                  "text-[10px]",
+                  isDark ? "text-white/60" : "text-slate-600",
+                )}
+              >
+                {formatPhoneNumber(solicitante.phone)}
+              </p>
+            </div>
+          </div>
+        </div>
+        {prestador && (
+          <div className="col-span-2">
+            <span
+              className={cn(
+                "text-[10px] uppercase font-bold block mb-1",
+                isDark ? "text-white/50" : "text-slate-600",
+              )}
+            >
+              Prestador (Quem Aceitou)
+            </span>
+            <div className="flex items-center gap-2 p-2 rounded-xl bg-green-500/10 border border-green-500/30">
+              <Truck size={14} className="text-green-600 dark:text-green-400" />
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <p
+                    className={cn(
+                      "text-xs font-semibold",
+                      isDark ? "text-white" : "text-slate-800",
+                    )}
+                  >
+                    {prestador.name}
+                  </p>
+                  {/* ESTRELA RENDERIZADA SEMPRE (COM FALLBACK PARA 5.0) */}
+                  <div className="flex items-center gap-0.5 text-[10px] font-bold text-yellow-500 bg-yellow-500/10 px-1.5 py-0.5 rounded border border-yellow-500/20">
+                    <Star size={10} fill="currentColor" />
+                    {((prestadorFull as any)?.ratingAverage || 5.0).toFixed(1)}
+                  </div>
+                </div>
+                <p
+                  className={cn(
+                    "text-[10px]",
+                    isDark ? "text-white/60" : "text-slate-600",
+                  )}
+                >
+                  {formatPhoneNumber(prestador.phone)}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+        <div className="col-span-2">
+          <span
+            className={cn(
               "text-[10px] uppercase font-bold block mb-0.5",
-              isDark ? "text-white/50" : "text-slate-600"
+              isDark ? "text-white/50" : "text-slate-600",
             )}
           >
             Localização
@@ -236,12 +555,20 @@ const DriverCallHistoryCard = ({
               "flex items-center gap-1 hover:underline text-xs font-medium truncate transition-colors",
               isDark
                 ? "text-orange-300 hover:text-orange-200"
-                : "text-orange-600 hover:text-orange-500"
+                : "text-orange-600 hover:text-orange-500",
             )}
           >
             <MapPin size={12} /> {call.location} <ExternalLink size={10} />
           </a>
         </div>
+        {call.status === "CONCLUIDO" && (
+          <RatingBlock
+            call={call}
+            isRequester={isRequester}
+            isDark={isDark}
+            onRateDriver={onRateDriver}
+          />
+        )}
         {call.cargoPhotoUrl && (
           <div className="col-span-2 p-2 rounded-xl bg-orange-500/10 dark:bg-orange-500/10 border border-orange-500/30">
             <div className="flex items-center justify-between">
@@ -261,74 +588,185 @@ const DriverCallHistoryCard = ({
                 rel="noopener noreferrer"
                 className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold text-white bg-orange-500 hover:bg-orange-600 transition-all shadow-md"
               >
-                <Download size={12} />
-                <span>Baixar</span>
+                <Download size={12} /> <span>Baixar</span>
               </a>
             </div>
           </div>
         )}
       </div>
 
-      {["EM ANDAMENTO", "ABERTO", "AGUARDANDO_APROVACAO"].includes(
-        call.status
-      ) && (
+      {/* 👇 NOVA LÓGICA DE BOTÕES INICIA AQUI */}
+      {[
+        "EM ANDAMENTO",
+        "ABERTO",
+        "AGUARDANDO_APROVACAO",
+        "APROVADO_PELO_ADMIN",
+      ].includes(call.status) && (
         <div
           className={cn(
-            "p-3 backdrop-blur-xl border-t flex justify-end gap-2 flex-wrap",
+            "p-3 backdrop-blur-xl border-t flex flex-col gap-3",
             isDark
               ? "bg-slate-800/90 border-slate-600/50"
-              : "bg-orange-50/60 border-orange-200/50"
+              : "bg-orange-50/60 border-orange-200/50",
           )}
         >
-          {otherParty && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleWhatsAppClick}
-              className="h-8 text-xs gap-1.5 border-green-400/30 text-green-300 hover:bg-green-500/20 hover:text-green-200 backdrop-blur-xl rounded-xl"
-            >
-              <Phone size={14} /> Contatar
-            </Button>
-          )}
-          {!isRequester && call.status === "EM ANDAMENTO" && (
-            <>
+          {/* TOPO DO RODAPÉ: Botões de Contato e Cancelamento */}
+          <div className="flex justify-between items-center w-full gap-2 flex-wrap">
+            {otherParty && (
               <Button
+                variant="outline"
                 size="sm"
-                onClick={() => onRequestApproval(call.id)}
-                className="h-8 text-xs bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl shadow-lg shadow-primary/30"
+                onClick={handleWhatsAppClick}
+                className="h-8 text-xs gap-1.5 border-green-400/30 text-green-500 hover:bg-green-500/20 rounded-xl"
               >
-                <CheckCircle size={14} className="mr-1" /> Finalizar
+                <Phone size={14} /> Contatar
               </Button>
+            )}
+
+            {/* ✅ BOTÃO DE CANCELAR DINÂMICO PARA O PRESTADOR */}
+            {!isRequester &&
+              ["EM ANDAMENTO", "AGUARDANDO_APROVACAO"].includes(
+                call.status,
+              ) && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={async () => {
+                    if (call.status === "AGUARDANDO_APROVACAO") {
+                      await updateDoc(doc(db, "supportCalls", call.id), {
+                        status: "EM ANDAMENTO",
+                      });
+                      sonnerToast.info("Retornado para Em Andamento.");
+                    } else {
+                      onCancelSupport(call.id);
+                    }
+                  }}
+                  className="h-8 text-xs text-red-500 hover:bg-red-500/20 rounded-xl ml-auto"
+                >
+                  Cancelar
+                </Button>
+              )}
+
+            {/* ✅ CANCELAR PEDIDO PARA O SOLICITANTE */}
+            {isRequester && call.status !== "CONCLUIDO" && (
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => onCancelSupport(call.id)}
-                className="h-8 text-xs text-red-300 hover:bg-red-500/20 rounded-xl"
+                onClick={() => onDeleteSupportRequest(call.id)}
+                className="h-8 text-xs text-red-400 hover:bg-red-500/20 rounded-xl ml-auto"
               >
-                Cancelar
+                <XCircle size={14} className="mr-1" /> Cancelar Pedido
               </Button>
-            </>
-          )}
-          {isRequester && call.status !== "CONCLUIDO" && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => onDeleteSupportRequest(call.id)}
-              className="h-8 text-xs text-red-300 hover:bg-red-500/20 rounded-xl"
-            >
-              <XCircle size={14} className="mr-1" /> Cancelar Pedido
-            </Button>
-          )}
+            )}
+          </div>
+
+          {/* BASE DO RODAPÉ: MÁQUINA DE ESTADOS VISUAIS PARA AMBOS */}
+          <div className="w-full mt-1">
+            {isRequester ? (
+              /* ================= LÓGICA DO SOLICITANTE ================= */
+              call.status === "AGUARDANDO_APROVACAO" ? (
+                <Button
+                  size="sm"
+                  disabled
+                  className="h-8 text-xs bg-slate-800/80 text-slate-400 rounded-xl cursor-not-allowed border border-white/5 w-full flex items-center justify-center gap-2"
+                >
+                  <Lock size={14} className="text-orange-500 animate-pulse" />
+                  Aguardando liberação do Admin...
+                </Button>
+              ) : call.status === "APROVADO_PELO_ADMIN" ? (
+                <div className="flex flex-col gap-2 w-full animate-in fade-in slide-in-from-bottom-2 mt-2">
+                  <div className="p-3 bg-orange-500/10 border border-orange-500/30 rounded-xl text-center shadow-inner">
+                    <p className="text-[11px] font-bold text-orange-500 mb-1 uppercase tracking-wide">
+                      Número de PIN liberado!
+                    </p>
+                    <p className="text-[10px] text-muted-foreground mb-3 leading-tight">
+                      Repasse o código abaixo ao driver prestador para finalizar
+                      o apoio.
+                    </p>
+                    <div className="flex items-center justify-center gap-2 bg-white/60 dark:bg-black/40 py-2.5 rounded-lg border border-orange-500/20">
+                      <Lock size={14} className="text-orange-500" />
+                      <span className="text-2xl font-mono font-black text-orange-500 tracking-widest">
+                        {call.securityCode}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ) : null
+            ) : /* ================= LÓGICA DO PRESTADOR ================= */
+            showPinInput && call.status === "APROVADO_PELO_ADMIN" ? (
+              /* 🔑 CAMPO DE PIN PARA O PRESTADOR */
+              <div className="flex flex-col gap-2 w-full animate-in fade-in slide-in-from-bottom-2 mt-2">
+                <p className="text-[10px] font-bold text-orange-500 text-center uppercase mb-2 tracking-wider leading-tight">
+                  Solicite o número de pin ao solicitante ou ao admin para
+                  finalizar.
+                </p>
+                <div className="flex gap-2 w-full">
+                  <input
+                    type="text"
+                    maxLength={4}
+                    value={pin}
+                    onChange={(e) => setPin(e.target.value)}
+                    placeholder="PIN"
+                    className="h-8 w-20 text-center rounded-xl border border-slate-300 text-xs text-slate-800 focus:ring-2 focus:ring-green-500 outline-none font-bold shadow-inner"
+                  />
+                  <Button
+                    size="sm"
+                    onClick={handleVerifyAndFinish}
+                    className="h-8 text-xs bg-green-600 hover:bg-green-700 text-white rounded-xl flex-1 font-bold shadow-lg"
+                  >
+                    Confirmar
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setShowPinInput(false)}
+                    className="h-8 text-xs rounded-xl"
+                  >
+                    X
+                  </Button>
+                </div>
+              </div>
+            ) : call.status === "EM ANDAMENTO" ? (
+              <Button
+                size="sm"
+                onClick={async () => {
+                  await updateDoc(doc(db, "supportCalls", call.id), {
+                    status: "AGUARDANDO_APROVACAO",
+                  });
+                  sonnerToast.info("Solicitado! Aguarde a liberação do Admin.");
+                }}
+                className="h-8 text-xs bg-primary hover:bg-primary/90 text-white rounded-xl shadow-lg w-full"
+              >
+                <CheckCircle size={14} className="mr-1" /> Encaminhar para
+                Aprovação
+              </Button>
+            ) : call.status === "AGUARDANDO_APROVACAO" ? (
+              <Button
+                size="sm"
+                disabled
+                className="h-8 text-xs bg-slate-800/80 text-slate-400 rounded-xl cursor-not-allowed border border-white/5 w-full flex items-center justify-center gap-2"
+              >
+                <Lock size={14} className="text-orange-500 animate-pulse" />
+                Aguardando liberação do Admin...
+              </Button>
+            ) : call.status === "APROVADO_PELO_ADMIN" ? (
+              <Button
+                size="sm"
+                onClick={() => setShowPinInput(true)}
+                className="h-8 text-xs bg-green-600 hover:bg-green-700 text-white rounded-xl shadow-lg shadow-green-900/40 font-bold animate-bounce w-full"
+              >
+                <Zap size={14} className="mr-1" /> INSERIR PIN PARA CONCLUIR
+              </Button>
+            ) : null}
+          </div>
         </div>
       )}
+      {/* 👆 NOVA LÓGICA DE BOTÕES TERMINA AQUI */}
     </Card>
   );
 };
 
-// --- COMPONENTE PRINCIPAL ---
-
 export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
-  // --- Estados ---
   const [allMyCalls, setAllMyCalls] = useState<SupportCall[]>([]);
   const [openSupportCalls, setOpenSupportCalls] = useState<SupportCall[]>([]);
   const [allDrivers, setAllDrivers] = useState<Driver[]>([]);
@@ -336,14 +774,15 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
   const [initialTabSet, setInitialTabSet] = useState(false);
   const [isSupportModalOpen, setIsSupportModalOpen] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
-
-  // Estado local para Optimistic UI - atualização instantânea
   const [localDriverStatus, setLocalDriverStatus] = useState<string>(
-    driver?.status || "INDISPONIVEL"
+    driver?.status || "INDISPONIVEL",
   );
 
-  // Form States
   const [location, setLocation] = useState("");
+  const [coordinates, setCoordinates] = useState<{
+    lat: number;
+    lng: number;
+  } | null>(null);
   const [isLocating, setIsLocating] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [modalError, setModalError] = useState("");
@@ -356,14 +795,15 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
   const [isBulky, setIsBulky] = useState(false);
   const [cargoPhoto, setCargoPhoto] = useState<File | null>(null);
   const [cargoPhotoPreview, setCargoPhotoPreview] = useState<string | null>(
-    null
+    null,
   );
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [isListening, setIsListening] = useState(false);
 
-  // Profile States
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [vehicleType, setVehicleType] = useState("");
+  const [gender, setGender] = useState<string>("");
   const [hubSearch, setHubSearch] = useState("");
   const [isHubDropdownOpen, setIsHubDropdownOpen] = useState(false);
   const [shopeeId, setShopeeId] = useState<string | null>(null);
@@ -377,7 +817,11 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [currentDateTime, setCurrentDateTime] = useState<Date>(new Date());
 
-  // UI States
+  // --- STATE DO LOTTIE ---
+  const [bgAnimation, setBgAnimation] = useState<any>(null);
+
+  const [installPrompt, setInstallPrompt] = useState<any>(null);
+
   const [historyFilter, setHistoryFilter] = useState<
     "all" | "requester" | "provider" | "inProgress"
   >("all");
@@ -389,19 +833,135 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
   const [endDate, setEndDate] = useState<Date | undefined>(() => new Date());
 
   const [routeIdSearch, setRouteIdSearch] = useState("");
-  // Removed unused state: setGlobalHubFilter
   const globalHubFilter = "Todos os Hubs";
   const [isMuted, setIsMuted] = useState(false);
   const [isProfileWarningVisible, setIsProfileWarningVisible] = useState(true);
   const [acceptingCallId, setAcceptingCallId] = useState<string | null>(null);
 
+  const [runTour, setRunTour] = useState(false);
+  const [tourStepIndex, setTourStepIndex] = useState(0);
+  const [showConfetti, setShowConfetti] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const userId = auth.currentUser?.uid;
   const isInitialOpenCallsLoad = useRef(true);
 
-  // ========================================
-  // SISTEMA DE PRESENÇA - Rastreamento de usuários online
-  // ========================================
+  const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
+
+  const isProfileEditingLocked = useMemo(() => {
+    return localDriverStatus !== "INDISPONIVEL";
+  }, [localDriverStatus]);
+
+  const myIds = useMemo(() => {
+    const ids: string[] = [];
+    if (userId) ids.push(userId);
+    if (driver?.uid) ids.push(driver.uid);
+    return Array.from(new Set(ids));
+  }, [userId, driver?.uid]);
+
+  const myIdsRef = useRef<string[]>([]);
+  myIdsRef.current = myIds;
+
+  // ==========================================
+  // CONFIGURAÇÃO DO TOUR
+  // ==========================================
+  const tourSteps: Step[] = [
+    {
+      target: "body",
+      content:
+        "Olá parceiro! Sou o Shopito. Bem vindo a plataforma de apoio! 🚀",
+      title: "Bem-vindo!",
+      placement: "center",
+      disableBeacon: true,
+      data: { mood: "welcome" },
+    },
+    {
+      target: ".tour-availability-switch",
+      content:
+        "Fique ONLINE aqui para começar a receber rotas. Quando estiver disponível, vamos te conectar com entregas! 💰",
+      title: "Controle de Status",
+      placement: "auto",
+      data: { mood: "point-right" },
+    },
+    {
+      target: "#weather-card-container",
+      content:
+        "Aqui você vê a previsão semanal. Se quiser detalhes, basta clicar no card para expandir.",
+      title: "Previsão do Tempo",
+      placement: "auto",
+      data: { mood: "weather" },
+      spotlightPadding: 10,
+    },
+    {
+      target: ".tour-support-button",
+      content:
+        "⚠️ ATENÇÃO! Use isso APENAS em emergências reais com a carga. Não abuse, pois precisamos garantir que todos sejam atendidos!",
+      title: "Socorro de Emergência",
+      placement: "auto",
+      data: { mood: "angry" },
+    },
+    {
+      target: ".tour-history-section",
+      content:
+        "Aqui você acompanha seu sucesso e suas entregas finalizadas. Quanto mais você trabalha, mais você ganha! 📊",
+      title: "Seu Histórico",
+      placement: "auto",
+      data: { mood: "ok" },
+    },
+    {
+      target: ".tour-map-section",
+      content:
+        "Este é seu QG Estratégico! 🗺️ No Mapa de Calor, as áreas em laranja mostram onde a demanda está alta. Use essa visão para se posicionar melhor e pegar mais rotas!",
+      title: "Visão Estratégica",
+      placement: "auto",
+      data: {
+        mood: "map",
+      },
+    },
+    {
+      target: ".tour-ranking-section",
+      content:
+        "Quem são os lendas da estrada? 🏆 Aqui no Ranking, a gente celebra quem mais apoiou os colegas. Cada ajuda conta pontos. Bora buscar esse topo?",
+      title: "Galeria de Campeões",
+      placement: "auto",
+      data: {
+        mood: "ranking",
+      },
+    },
+    {
+      target: ".tour-profile-section",
+      content:
+        "Mantenha seus dados atualizados e sua senha segura aqui nesta aba.",
+      title: "Seu Perfil",
+      placement: "auto",
+      data: { mood: "profile" },
+    },
+    {
+      target: "#chatbot-tour-target",
+      content:
+        "Suporte 24hrs qualquer duvida é só falar comigo estou aqui para te auxiliar.",
+      title: "Suporte 24H",
+      placement: isMobile ? "top" : "left",
+      data: { mood: "chicken" },
+      spotlightPadding: 5,
+      styles: {
+        overlay: { backgroundColor: "transparent", mixBlendMode: "normal" },
+        spotlight: { backgroundColor: "transparent" },
+      },
+    },
+
+    {
+      target: "body",
+      content:
+        "Tudo pronto! Boa Sorte na sua jornada, estarei aqui se precisar.! 🎉",
+      title: "Vamos Começar!",
+      placement: "center",
+      data: {
+        mood: "finale",
+      },
+    },
+  ];
+
   usePresence(
     userId || null,
     "driver",
@@ -411,7 +971,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
           email: auth.currentUser?.email || "",
         }
       : null,
-    true // Sempre ativo para motoristas
+    true,
   );
 
   const TABS = useMemo(
@@ -419,10 +979,12 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       { id: "availability", label: "Status", icon: <Zap size={20} /> },
       { id: "support", label: "Apoio", icon: <AlertTriangle size={20} /> },
       { id: "activeCalls", label: "Chamados", icon: <Clock size={20} /> },
+      { id: "map", label: "Mapa", icon: <MapIcon size={20} /> },
+      { id: "ranking", label: "Ranking", icon: <Trophy size={20} /> },
       { id: "tutorial", label: "Ajuda", icon: <BookOpen size={20} /> },
       { id: "profile", label: "Perfil", icon: <User size={20} /> },
     ],
-    []
+    [],
   );
 
   type TabId =
@@ -430,7 +992,9 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     | "support"
     | "activeCalls"
     | "tutorial"
-    | "profile";
+    | "profile"
+    | "map"
+    | "ranking";
   const [activeTab, setActiveTab] = useState<TabId>("profile");
 
   const isProfileComplete = useMemo(() => {
@@ -445,15 +1009,47 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     );
   }, [driver, shopeeId]);
 
+  const ACTIVE_STATUSES = [
+    "ABERTO",
+    "EM ANDAMENTO",
+    "AGUARDANDO_APROVACAO",
+    "APROVADO_PELO_ADMIN",
+  ] as const;
+
   const activeCallForDriver = useMemo(() => {
     return (
       allMyCalls.find(
-        (call) => call.solicitante.id === userId && call.status === "ABERTO"
+        (call) =>
+          myIds.includes(call.solicitante?.id ?? "") &&
+          (ACTIVE_STATUSES as readonly string[]).includes(call.status),
       ) || null
     );
-  }, [allMyCalls, userId]);
+  }, [allMyCalls, myIds]);
 
-  // Driver com status local para Optimistic UI
+  const activeProviderCall = useMemo(() => {
+    return (
+      allMyCalls.find(
+        (c) =>
+          myIds.includes(c.assignedTo ?? "") &&
+          (ACTIVE_STATUSES as readonly string[]).includes(c.status),
+      ) || null
+    );
+  }, [allMyCalls, myIds]);
+
+  const hasActiveCall = useMemo(() => {
+    return allMyCalls.some((call) => {
+      if (!(ACTIVE_STATUSES as readonly string[]).includes(call.status))
+        return false;
+      const isSolicitante = myIds.includes(call.solicitante?.id ?? "");
+      const isPrestador = myIds.includes(call.assignedTo ?? "");
+      return isSolicitante || isPrestador;
+    });
+  }, [allMyCalls, myIds]);
+
+  const canAcceptNewCall = useMemo(() => {
+    return !activeCallForDriver && !activeProviderCall;
+  }, [activeCallForDriver, activeProviderCall]);
+
   const driverWithLocalStatus = useMemo(() => {
     return {
       ...driver,
@@ -468,66 +1064,143 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
   const filteredHubs = useMemo(() => {
     if (!hubSearch) return HUBS;
     return HUBS.filter((h) =>
-      h.toLowerCase().includes(hubSearch.toLowerCase())
+      h.toLowerCase().includes(hubSearch.toLowerCase()),
     );
   }, [hubSearch]);
 
+  // ✅ ISOLAMENTO BLINDADO DE HISTÓRICO E CHAMADOS ATIVOS (POR CIDADE DO MOTORISTA)
   const filteredCalls = useMemo(() => {
-    const active = allMyCalls.filter(
-      (c) =>
-        (globalHubFilter === "Todos os Hubs" || c.hub === globalHubFilter) &&
-        c.status !== "EXCLUIDO"
-    );
+    const active = allMyCalls.filter((c) => {
+      if (c.status === "EXCLUIDO") return false;
+
+      // Se o motorista não tem hub definido no perfil, não quebra a tela
+      if (!driver?.hub) return true;
+
+      // Extrai a cidade limpa do motorista e do chamado (Índice 2 do formato LM Hub_PR_Cidade_Sufixo)
+      const driverCity =
+        driver.hub.split("_")[2]?.trim().toLowerCase() ||
+        driver.hub.toLowerCase();
+      const callCity = c.hub
+        ? c.hub.split("_")[2]?.trim().toLowerCase() || c.hub.toLowerCase()
+        : "";
+
+      return driverCity === callCity;
+    });
+
     if (historyFilter === "requester")
-      return active.filter((c) => c.solicitante.id === userId);
+      return active.filter(
+        (c) => c.solicitante?.id && myIds.includes(c.solicitante.id),
+      );
     if (historyFilter === "provider")
-      return active.filter((c) => c.assignedTo === userId);
+      return active.filter((c) => c.assignedTo && myIds.includes(c.assignedTo));
     if (historyFilter === "inProgress")
       return active.filter((c) =>
-        ["EM ANDAMENTO", "AGUARDANDO_APROVACAO"].includes(c.status)
+        [
+          "EM ANDAMENTO",
+          "AGUARDANDO_APROVACAO",
+          "APROVADO_PELO_ADMIN",
+        ].includes(c.status),
       );
     return active;
-  }, [allMyCalls, historyFilter, userId, globalHubFilter]);
+  }, [allMyCalls, historyFilter, myIds, driver?.hub]);
 
-  const filteredOpenCalls = useMemo(
-    () =>
-      openSupportCalls.filter(
-        (c) =>
-          (globalHubFilter === "Todos os Hubs" || c.hub === globalHubFilter) &&
-          (!routeIdSearch ||
-            c.routeId?.toLowerCase().includes(routeIdSearch.toLowerCase()))
-      ),
-    [openSupportCalls, routeIdSearch, globalHubFilter]
-  );
+  // ✅ ISOLAMENTO BLINDADO DE CHAMADOS ABERTOS (MAPA E LISTA "CHAMADOS NA REGIÃO")
+  const filteredOpenCalls = useMemo(() => {
+    return openSupportCalls.filter((c) => {
+      // 1. Esconde chamados criados pelo próprio motorista
+      if (myIds.includes(c.solicitante?.id ?? "")) return false;
 
-  // Removed unused variable: allHubs
+      // 2. Filtro de pesquisa de rota no input
+      if (
+        routeIdSearch &&
+        !c.routeId?.toLowerCase().includes(routeIdSearch.toLowerCase())
+      )
+        return false;
 
-  // --- Efeitos ---
+      // 3. Isolamento por Cidade (Parsing inteligente)
+      if (!driver?.hub) return true;
+      const driverCity =
+        driver.hub.split("_")[2]?.trim().toLowerCase() ||
+        driver.hub.toLowerCase();
+      const callCity = c.hub
+        ? c.hub.split("_")[2]?.trim().toLowerCase() || c.hub.toLowerCase()
+        : "";
+
+      return driverCity === callCity;
+    });
+  }, [openSupportCalls, routeIdSearch, myIds, driver?.hub]);
+
+  const rankedDrivers = useMemo(() => {
+    return [...allDrivers]
+      .filter((d) => (d as any).completedSupports > 0)
+      .sort((a, b) => {
+        const supportsA = (a as any).completedSupports || 0;
+        const supportsB = (b as any).completedSupports || 0;
+        if (supportsA !== supportsB) return supportsB - supportsA;
+        const ratingA = (a as any).ratingAverage || 0;
+        const ratingB = (b as any).ratingAverage || 0;
+        return ratingB - ratingA;
+      })
+      .slice(0, 10);
+  }, [allDrivers]);
+
+  // --- EFEITO PARA CARREGAR O JSON DE ANIMAÇÃO ---
+  useEffect(() => {
+    if (activeTab === "ranking" && !bgAnimation) {
+      fetch("/SynthRunner.json")
+        .then((response) => {
+          if (!response.ok) throw new Error("Erro ao carregar JSON");
+          return response.json();
+        })
+        .then((data) => setBgAnimation(data))
+        .catch((err) =>
+          console.error("Falha ao carregar animação Lottie:", err),
+        );
+    }
+  }, [activeTab, bgAnimation]);
+
   useEffect(() => {
     const isDark = document.documentElement.classList.contains("dark");
     setTheme(isDark ? "dark" : "light");
   }, []);
 
-  // Atualizar data/hora do Brasil
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setInstallPrompt(e);
+    };
+    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+    return () =>
+      window.removeEventListener(
+        "beforeinstallprompt",
+        handleBeforeInstallPrompt,
+      );
+  }, []);
+
+  const handleInstallPWA = () => {
+    if (installPrompt) {
+      installPrompt.prompt();
+      installPrompt.userChoice.then((choiceResult: any) => {
+        if (choiceResult.outcome === "accepted") setInstallPrompt(null);
+      });
+    }
+  };
+
   useEffect(() => {
     const updateDateTime = () => {
       const brazilTime = new Date(
-        new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" })
+        new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }),
       );
       setCurrentDateTime(brazilTime);
     };
-
     updateDateTime();
     const interval = setInterval(updateDateTime, 1000);
-
     return () => clearInterval(interval);
   }, []);
 
   const toggleTheme = () => {
     const root = window.document.documentElement;
     const newTheme = theme === "light" ? "dark" : "light";
-
-    // Aplicar tema imediatamente para animação
     root.classList.remove("light", "dark");
     root.classList.add(newTheme);
     setTheme(newTheme);
@@ -545,16 +1218,83 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
   }, [isProfileComplete, initialTabSet]);
 
   useEffect(() => {
+    if (!isProfileComplete && !runTour && activeTab !== "profile") {
+      setActiveTab("profile");
+      showNotification(
+        "error",
+        "Perfil Incompleto",
+        "Por favor, preencha seus dados.",
+      );
+    }
+  }, [isProfileComplete, runTour, activeTab]);
+
+  useEffect(() => {
     if (driver) {
       setName(driver.name || "");
       setPhone(driver.phone || "");
       setHub(driver.hub || "");
       setVehicleType(driver.vehicleType || "");
+      setGender((driver as any).gender || "Homem");
       setHubSearch(driver.hub || "");
-      // Sincronizar status local com o driver
       setLocalDriverStatus(driver.status || "INDISPONIVEL");
     }
   }, [driver]);
+
+  useEffect(() => {
+    const tourKey = `driver-tour-seen-v35-${userId}`;
+    const hasSeenTour = localStorage.getItem(tourKey);
+    if (!hasSeenTour) {
+      setTimeout(() => setRunTour(true), 2000);
+    }
+  }, [driver, userId]);
+
+  // ==========================================
+  // CALLBACK DE NAVEGAÇÃO DO JOYRIDE (ATUALIZADO)
+  // ==========================================
+  const handleJoyrideCallback = (data: CallBackProps) => {
+    const { status, type, index, action } = data;
+    const finishedStatuses: string[] = [STATUS.FINISHED, STATUS.SKIPPED];
+
+    if (type === EVENTS.STEP_AFTER) {
+      // Avançar (Next)
+      if (action === ACTIONS.NEXT) {
+        const nextIndex = index + 1;
+        if (nextIndex === 1) setActiveTab("availability");
+        if (nextIndex === 2) setActiveTab("availability");
+        if (nextIndex === 3) setActiveTab("support");
+        if (nextIndex === 4) setActiveTab("activeCalls");
+        if (nextIndex === 5) setActiveTab("map"); // Abre a aba Mapa
+        if (nextIndex === 6) setActiveTab("ranking"); // Abre a aba Ranking
+        if (nextIndex === 7) setActiveTab("profile"); // Abre a aba Perfil
+        setTimeout(() => {
+          setTourStepIndex(nextIndex);
+        }, 400);
+      }
+      // Voltar (Prev)
+      if (action === ACTIONS.PREV) {
+        const prevIndex = index - 1;
+        if (prevIndex === 1) setActiveTab("availability");
+        if (prevIndex === 2) setActiveTab("availability");
+        if (prevIndex === 3) setActiveTab("support");
+        if (prevIndex === 4) setActiveTab("activeCalls");
+        if (prevIndex === 5) setActiveTab("map");
+        if (prevIndex === 6) setActiveTab("ranking");
+        if (prevIndex === 7) setActiveTab("profile");
+        setTimeout(() => setTourStepIndex(prevIndex), 400);
+      }
+    }
+
+    if (finishedStatuses.includes(status)) {
+      setRunTour(false);
+      if (userId) {
+        localStorage.setItem(`driver-tour-seen-v35-${userId}`, "true");
+      }
+      if (status === STATUS.FINISHED) {
+        setShowConfetti(true);
+        setTimeout(() => setShowConfetti(false), 8000);
+      }
+    }
+  };
 
   useEffect(() => {
     const fetchShopeeId = async () => {
@@ -565,16 +1305,13 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
           driversRef,
           or(
             where("uid", "==", driver.uid),
-            where("googleUid", "==", driver.uid)
-          )
+            where("googleUid", "==", driver.uid),
+          ),
         );
         try {
           const querySnapshot = await getDocs(q);
-          if (!querySnapshot.empty) {
-            setShopeeId(querySnapshot.docs[0].id);
-          } else {
-            setShopeeId("Não encontrado");
-          }
+          if (!querySnapshot.empty) setShopeeId(querySnapshot.docs[0].id);
+          else setShopeeId("Não encontrado");
         } catch (error) {
           setShopeeId("Erro ao buscar");
         }
@@ -599,7 +1336,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
             "p-2 rounded-full",
             newMutedState
               ? "bg-red-500/20 text-red-300 border border-red-400/30"
-              : "bg-green-500/20 text-green-300 border border-green-400/30"
+              : "bg-green-500/20 text-green-300 border border-green-400/30",
           )}
         >
           {newMutedState ? <VolumeX size={20} /> : <Volume2 size={20} />}
@@ -620,7 +1357,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
   };
 
   const triggerNotificationRef = useRef((_newCall: SupportCall) => {});
-
   useEffect(() => {
     triggerNotificationRef.current = (newCall: SupportCall) => {
       if (
@@ -657,7 +1393,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     const allDriversQuery = query(collection(db, "motoristas_pre_aprovados"));
     const unsubscribeAllDrivers = onSnapshot(allDriversQuery, (snapshot) => {
       const driversData = snapshot.docs.map(
-        (doc) => ({ ...doc.data(), uid: doc.id } as Driver)
+        (doc) => ({ ...doc.data(), uid: doc.id }) as Driver,
       );
       setAllDrivers(driversData);
     });
@@ -667,29 +1403,91 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     const end = endDate ? new Date(endDate) : new Date();
     end.setHours(23, 59, 59, 999);
 
-    const myCallsQuery = query(
+    const driverFirestoreUid = driver?.uid || "";
+    const myCallsQueryByAuth = query(
       collection(db, "supportCalls"),
       and(
         or(
           where("solicitante.id", "==", userId),
-          where("assignedTo", "==", userId)
+          where("assignedTo", "==", userId),
         ),
         where("timestamp", ">=", Timestamp.fromDate(start)),
-        where("timestamp", "<=", Timestamp.fromDate(end))
+        where("timestamp", "<=", Timestamp.fromDate(end)),
       ),
-      orderBy("timestamp", "desc")
+      orderBy("timestamp", "desc"),
     );
 
-    const unsubscribeMyCalls = onSnapshot(myCallsQuery, (snapshot) => {
-      const callsData = snapshot.docs.map(
-        (doc) => ({ id: doc.id, ...doc.data() } as SupportCall)
-      );
-      setAllMyCalls(callsData);
-    });
+    const myCallsQueryByFirestoreUid =
+      driverFirestoreUid && driverFirestoreUid !== userId
+        ? query(
+            collection(db, "supportCalls"),
+            and(
+              or(
+                where("solicitante.id", "==", driverFirestoreUid),
+                where("assignedTo", "==", driverFirestoreUid),
+              ),
+              where("timestamp", ">=", Timestamp.fromDate(start)),
+              where("timestamp", "<=", Timestamp.fromDate(end)),
+            ),
+            orderBy("timestamp", "desc"),
+          )
+        : null;
+
+    const mergeAndDeduplicateCalls = (
+      primary: SupportCall[],
+      secondary: SupportCall[],
+    ): SupportCall[] => {
+      const map = new Map<string, SupportCall>();
+      [...primary, ...secondary].forEach((c) => map.set(c.id, c));
+      return Array.from(map.values()).sort((a, b) => {
+        const tA =
+          (a.timestamp as any)?.toMillis?.() ??
+          ((a.timestamp as any)?.seconds != null
+            ? (a.timestamp as any).seconds * 1000
+            : 0);
+        const tB =
+          (b.timestamp as any)?.toMillis?.() ??
+          ((b.timestamp as any)?.seconds != null
+            ? (b.timestamp as any).seconds * 1000
+            : 0);
+        return tB - tA;
+      });
+    };
+
+    let callsByAuth: SupportCall[] = [];
+    let callsByFirestoreUid: SupportCall[] = [];
+
+    const unsubscribeMyCallsAuth = onSnapshot(
+      myCallsQueryByAuth,
+      (snapshot) => {
+        callsByAuth = snapshot.docs.map(
+          (doc) => ({ id: doc.id, ...doc.data() }) as SupportCall,
+        );
+        setAllMyCalls(
+          mergeAndDeduplicateCalls(callsByAuth, callsByFirestoreUid),
+        );
+      },
+    );
+
+    const unsubscribeMyCallsFirestoreUid = myCallsQueryByFirestoreUid
+      ? onSnapshot(myCallsQueryByFirestoreUid, (snapshot) => {
+          callsByFirestoreUid = snapshot.docs.map(
+            (doc) => ({ id: doc.id, ...doc.data() }) as SupportCall,
+          );
+          setAllMyCalls(
+            mergeAndDeduplicateCalls(callsByAuth, callsByFirestoreUid),
+          );
+        })
+      : null;
+
+    const unsubscribeMyCalls = () => {
+      unsubscribeMyCallsAuth();
+      if (unsubscribeMyCallsFirestoreUid) unsubscribeMyCallsFirestoreUid();
+    };
 
     const openCallsQuery = query(
       collection(db, "supportCalls"),
-      where("status", "==", "ABERTO")
+      where("status", "==", "ABERTO"),
     );
     const unsubscribeOpenCalls = onSnapshot(openCallsQuery, (snapshot) => {
       snapshot.docChanges().forEach((change) => {
@@ -697,7 +1495,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
           id: change.doc.id,
           ...change.doc.data(),
         } as SupportCall;
-        if (callData.solicitante.id !== userId) {
+        if (!myIdsRef.current.includes(callData.solicitante?.id ?? "")) {
           if (change.type === "added" && !isInitialOpenCallsLoad.current)
             triggerNotificationRef.current(callData);
           if (change.type === "removed")
@@ -706,10 +1504,12 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       });
       isInitialOpenCallsLoad.current = false;
       const openCallsData = snapshot.docs.map(
-        (doc) => ({ id: doc.id, ...doc.data() } as SupportCall)
+        (doc) => ({ id: doc.id, ...doc.data() }) as SupportCall,
       );
       setOpenSupportCalls(
-        openCallsData.filter((call) => call.solicitante.id !== userId)
+        openCallsData.filter(
+          (call) => !myIdsRef.current.includes(call.solicitante?.id),
+        ),
       );
     });
 
@@ -722,7 +1522,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
 
   const updateDriver = async (
     driverId: string,
-    updates: Partial<Omit<Driver, "uid">>
+    updates: Partial<Omit<Driver, "uid">>,
   ) => {
     if (!driverId) return;
     await updateDoc(doc(db, "motoristas_pre_aprovados", driverId), updates);
@@ -730,7 +1530,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
 
   const updateCall = async (
     id: string,
-    updates: Partial<Omit<SupportCall, "id">>
+    updates: Partial<Omit<SupportCall, "id">>,
   ) => {
     await updateDoc(doc(db, "supportCalls", id), updates as any);
   };
@@ -742,50 +1542,42 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     });
   };
 
-  // --- HANDLERS ---
-
   const handleAddField = (
-    setter: React.Dispatch<React.SetStateAction<string[]>>
-  ) => {
-    setter((prev) => [...prev, ""]);
-  };
-
+    setter: React.Dispatch<React.SetStateAction<string[]>>,
+  ) => setter((prev) => [...prev, ""]);
   const handleRemoveField = (
     index: number,
-    setter: React.Dispatch<React.SetStateAction<string[]>>
-  ) => {
-    setter((prev) => prev.filter((_, i) => i !== index));
-  };
-
+    setter: React.Dispatch<React.SetStateAction<string[]>>,
+  ) => setter((prev) => prev.filter((_, i) => i !== index));
   const handleFieldChange = (
     index: number,
     value: string,
-    setter: React.Dispatch<React.SetStateAction<string[]>>
-  ) => {
+    setter: React.Dispatch<React.SetStateAction<string[]>>,
+  ) =>
     setter((prev) => {
       const newValues = [...prev];
       newValues[index] = value;
       return newValues;
     });
-  };
 
   const handleAvailabilityChange = async (isAvailable: boolean) => {
     if (!isProfileComplete || !shopeeId)
       return showNotification(
         "error",
         "Perfil Incompleto",
-        "Verifique seus dados."
+        "Verifique seus dados.",
       );
-
-    // OPTIMISTIC UI: Atualizar estado local IMEDIATAMENTE
+    if (isAvailable && (activeCallForDriver || activeProviderCall))
+      return showNotification(
+        "error",
+        "Ocupado",
+        "Você tem chamados ativos. Finalize-os antes.",
+      );
     const newStatus = isAvailable ? "DISPONIVEL" : "INDISPONIVEL";
     setLocalDriverStatus(newStatus);
-
-    // Depois atualizar no Firebase (não esperamos a resposta)
     try {
       await updateDriver(shopeeId, { status: newStatus });
     } catch (error) {
-      // Se falhar, reverter o estado local
       setLocalDriverStatus(driver.status || "INDISPONIVEL");
       showNotification("error", "Erro", "Falha ao atualizar status.");
     }
@@ -797,15 +1589,24 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     if (localDriverStatus === "EM_ROTA")
       return showNotification("error", "Ocupado", "Você já está em rota.");
     setAcceptingCallId(callId);
-
-    // OPTIMISTIC UI: Atualizar status local para EM_ROTA imediatamente
     setLocalDriverStatus("EM_ROTA");
-
     try {
-      await updateCall(callId, { assignedTo: userId, status: "EM ANDAMENTO" });
+      await updateCall(callId, {
+        assignedTo: userId,
+        status: "EM ANDAMENTO",
+        prestador: {
+          id: driver.uid,
+          name: driver.name,
+          avatar: driver.avatar || null,
+          initials:
+            driver.initials || driver.name?.charAt(0).toUpperCase() || "M",
+          phone: driver.phone,
+        },
+      } as any);
+      // REGRA 3B: Marca motorista prestador como INDISPONIVEL ao aceitar chamado
+      await updateDriver(shopeeId, { status: "INDISPONIVEL" });
       await updateDriver(shopeeId, { status: "EM_ROTA" });
     } catch {
-      // Se falhar, reverter o status
       setLocalDriverStatus(driver.status || "INDISPONIVEL");
       showNotification("error", "Erro", "Falha ao aceitar.");
     } finally {
@@ -813,20 +1614,25 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     }
   };
 
-  const handleRequestApproval = (id: string) => {
-    updateCall(id, { status: "AGUARDANDO_APROVACAO" })
-      .then(() =>
-        showNotification("success", "Sucesso", "Solicitado aprovação.")
-      )
-      .catch(() => showNotification("error", "Erro", "Falha na solicitação."));
+  const handleRequestApproval = async (id: string) => {
+    await updateCall(id, {
+      status: "CONCLUIDO",
+      securityCode: deleteField(),
+    } as any);
+    if (shopeeId) {
+      const driverRef = doc(db, "motoristas_pre_aprovados", shopeeId);
+      await updateDoc(driverRef, { completedSupports: increment(1) });
+    }
+    showNotification(
+      "success",
+      "Sucesso",
+      "Chamado concluído e contabilizado!",
+    );
   };
 
   const handleCancelSupport = async (id: string) => {
     if (!userId || !shopeeId) return;
-
-    // OPTIMISTIC UI: Atualizar status local para DISPONIVEL imediatamente
     setLocalDriverStatus("DISPONIVEL");
-
     try {
       await updateCall(id, {
         assignedTo: deleteField(),
@@ -835,7 +1641,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       await updateDriver(shopeeId, { status: "DISPONIVEL" });
       showNotification("success", "Cancelado", "Apoio cancelado.");
     } catch {
-      // Se falhar, reverter o status
       setLocalDriverStatus(driver.status || "INDISPONIVEL");
       showNotification("error", "Erro", "Falha ao cancelar.");
     }
@@ -849,6 +1654,69 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     showNotification("success", "Excluído", "Solicitação removida.");
   };
 
+  const handleRateDriver = async (
+    callId: string,
+    driverUid: string,
+    ratingValue: number,
+    categories?: { atendimento: number; agilidade: number; educacao: number },
+    ratingKey?: string,
+  ) => {
+    if (!driverUid)
+      return showNotification("error", "Erro", "Motorista não encontrado.");
+    try {
+      const q = query(
+        collection(db, "motoristas_pre_aprovados"),
+        where("uid", "==", driverUid),
+      );
+      const querySnapshot = await getDocs(q);
+      if (querySnapshot.empty)
+        throw new Error("Perfil do motorista não encontrado para avaliação.");
+      const driverDocRef = querySnapshot.docs[0].ref;
+      const callDocRef = doc(db, "supportCalls", callId);
+      await runTransaction(db, async (transaction) => {
+        const driverDoc = await transaction.get(driverDocRef);
+        if (!driverDoc.exists()) throw new Error("Motorista não existe!");
+        const data = driverDoc.data();
+        const currentAvg = data.ratingAverage || 5.0;
+        const currentCount = data.ratingCount || 0;
+        const newCount = currentCount + 1;
+        const newAvg = (currentAvg * currentCount + ratingValue) / newCount;
+        const driverUpdates: Record<string, any> = {
+          ratingAverage: newAvg,
+          ratingCount: newCount,
+        };
+        if (categories) {
+          const prevAtend = data.ratingAtendimentoAvg || ratingValue;
+          const prevAgil = data.ratingAgilidadeAvg || ratingValue;
+          const prevEduc = data.ratingEducacaoAvg || ratingValue;
+          const prevCnt = data.ratingCount || 0;
+          driverUpdates.ratingAtendimentoAvg =
+            (prevAtend * prevCnt + categories.atendimento) / newCount;
+          driverUpdates.ratingAgilidadeAvg =
+            (prevAgil * prevCnt + categories.agilidade) / newCount;
+          driverUpdates.ratingEducacaoAvg =
+            (prevEduc * prevCnt + categories.educacao) / newCount;
+        }
+        transaction.update(driverDocRef, driverUpdates);
+        const callUpdate: Record<string, any> = { rating: ratingValue };
+        if (ratingKey)
+          callUpdate[ratingKey] = { ...categories, avg: ratingValue };
+        transaction.update(callDocRef, callUpdate);
+      });
+      showNotification(
+        "success",
+        "Avaliado!",
+        `Avaliação enviada com sucesso.`,
+      );
+    } catch (error: any) {
+      showNotification(
+        "error",
+        "Erro",
+        "Falha ao enviar avaliação: " + error.message,
+      );
+    }
+  };
+
   const handleUpdateProfile = async () => {
     if (!shopeeId) return;
     const cleanPhone = phone.replace(/\D/g, "");
@@ -856,7 +1724,13 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       return showNotification("error", "Telefone", "Use DDD + 9 dígitos.");
     if (!HUBS.includes(hub as any))
       return showNotification("error", "Hub", "Selecione um Hub válido.");
-    await updateDriver(shopeeId, { name, phone: cleanPhone, hub, vehicleType });
+    await updateDriver(shopeeId, {
+      name,
+      phone: cleanPhone,
+      hub,
+      vehicleType,
+      gender,
+    } as any);
     showNotification("success", "Salvo", "Perfil atualizado.");
     setIsProfileWarningVisible(false);
   };
@@ -880,7 +1754,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     try {
       const credential = EmailAuthProvider.credential(
         user.email,
-        currentPassword
+        currentPassword,
       );
       await reauthenticateWithCredential(user, credential);
       await updatePassword(user, newPassword);
@@ -920,7 +1794,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
           setIsUploading(false);
           showNotification("success", "Foto", "Atualizada com sucesso.");
         });
-      }
+      },
     );
   };
 
@@ -932,15 +1806,19 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     setIsLocating(true);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
+        setCoordinates({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+        });
         setLocation(
-          `http://maps.google.com/?q=${pos.coords.latitude},${pos.coords.longitude}`
+          `http://maps.google.com/?q=${pos.coords.latitude},${pos.coords.longitude}`,
         );
         setIsLocating(false);
       },
       () => {
         setModalError("Erro ao obter localização.");
         setIsLocating(false);
-      }
+      },
     );
   };
 
@@ -960,6 +1838,32 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     }
   };
 
+  const handleVoiceInput = (
+    field: "reason" | "description",
+    setter: React.Dispatch<React.SetStateAction<string>>,
+  ) => {
+    if (!("webkitSpeechRecognition" in window))
+      return showNotification(
+        "error",
+        "Não Suportado",
+        "Seu navegador não suporta voz.",
+      );
+    const recognition = new (window as any).webkitSpeechRecognition();
+    recognition.lang = "pt-BR";
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.onstart = () => {
+      setIsListening(true);
+      showNotification("info", "Ouvindo...", "Pode falar agora.");
+    };
+    recognition.onend = () => setIsListening(false);
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[0][0].transcript;
+      setter((prev) => (prev ? `${prev} ${transcript}` : transcript));
+    };
+    recognition.start();
+  };
+
   const handleSupportSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
@@ -969,11 +1873,16 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       setIsSubmitting(false);
       return;
     }
-
+    if (hasActiveCall) {
+      setModalError(
+        "Você já tem um apoio em andamento, finalize o primeiro para realizar uma nova solicitação.",
+      );
+      setIsSubmitting(false);
+      return;
+    }
     const pkg = Number(packageCount);
     const regions = deliveryRegions.filter(Boolean);
     const vehicles = neededVehicles.filter(Boolean);
-
     if (pkg < 20) {
       setModalError("Mínimo 20 pacotes.");
       setIsSubmitting(false);
@@ -991,14 +1900,13 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       setIsSubmitting(false);
       return;
     }
-
     let cargoPhotoUrl = null;
     if (cargoPhoto) {
       try {
         setIsUploadingPhoto(true);
         const photoRef = ref(
           storage,
-          `cargo-photos/${user.uid}/${Date.now()}_${cargoPhoto.name}`
+          `cargo-photos/${user.uid}/${Date.now()}_${cargoPhoto.name}`,
         );
         await uploadBytesResumable(photoRef, cargoPhoto);
         cargoPhotoUrl = await getDownloadURL(photoRef);
@@ -1011,31 +1919,29 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
         setIsUploadingPhoto(false);
       }
     }
-
-    const informalDesc = `MOTIVO: ${reason}. DETALHES: ${description}. Hub: ${hub}. Loc: ${location}. Qtd: ${pkg}. Regiões: ${regions.join(
-      ", "
-    )}. Veículos: ${vehicles.join(", ")}. ${isBulky ? "VOLUMOSO" : ""}`;
-
+    const informalDesc = `MOTIVO: ${reason}. DETALHES: ${description}. Hub: ${hub}. Loc: ${location}. Qtd: ${pkg}. Regiões: ${regions.join(", ")}. Veículos: ${vehicles.join(", ")}. ${isBulky ? "VOLUMOSO" : ""}`;
     try {
-      const professionalDesc = informalDesc;
-
       let urgency: UrgencyLevel = "BAIXA";
       if (pkg >= 100) urgency = "URGENTE";
       else if (pkg >= 90) urgency = "ALTA";
       else if (pkg >= 60) urgency = "MEDIA";
-
       const newCall = {
         routeId: `SPX-${Date.now().toString().slice(-6)}`,
-        description: professionalDesc,
+        description: informalDesc,
         urgency,
         location,
+        collectionLocation: location, // [CORREÇÃO] Campo reintegrado para satisfazer a validação
         status: "ABERTO",
+        securityCode: generateSecurityCode(),
         vehicleType: vehicles.join(", "),
         isBulky,
         hub,
         packageCount: pkg,
         deliveryRegions: regions,
         cargoPhotoUrl,
+        coordinates: coordinates
+          ? new GeoPoint(coordinates.lat, coordinates.lng)
+          : null,
         solicitante: {
           id: driver.uid,
           name: driver.name,
@@ -1045,8 +1951,12 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
           phone: driver.phone,
         },
       };
-
       await addNewCall(newCall);
+      // REGRA 3A: Marca motorista como INDISPONIVEL ao enviar solicitação
+      if (shopeeId) {
+        await updateDriver(shopeeId, { status: "INDISPONIVEL" });
+        setLocalDriverStatus("INDISPONIVEL");
+      }
       setIsSupportModalOpen(false);
       setShowSuccessModal(true);
       setDeliveryRegions([""]);
@@ -1056,6 +1966,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       setPackageCount("");
       setCargoPhoto(null);
       setCargoPhotoPreview(null);
+      setCoordinates(null);
     } catch (err: any) {
       setModalError(err.message);
     } finally {
@@ -1063,13 +1974,31 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     }
   };
 
-  // --- RENDER ---
   return (
     <>
       <LoadingOverlay
         isLoading={isSubmitting || isReauthenticating}
         text="Processando..."
       />
+      <Joyride
+        steps={tourSteps}
+        run={runTour}
+        stepIndex={tourStepIndex}
+        continuous
+        showProgress
+        showSkipButton
+        disableOverlayClose={true}
+        tooltipComponent={CustomTooltip}
+        callback={handleJoyrideCallback}
+        scrollOffset={isMobile ? 120 : 130}
+        disableScrollParentFix={false}
+        spotlightClicks={true}
+        floaterProps={{ disableAnimation: true, offset: 24 }}
+        spotlightPadding={10}
+        disableOverlay={!runTour}
+        styles={{ options: { zIndex: 10000, primaryColor: "#EE4D2D" } }}
+      />
+      {showConfetti && <Confetti numberOfPieces={500} recycle={false} />}
       <div
         className="min-h-dvh font-sans pb-24 transition-colors duration-300"
         style={{
@@ -1080,17 +2009,14 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
           backgroundAttachment: "fixed",
         }}
       >
-        {/* HEADER MODERNO */}
         <header
           className={cn(
             "sticky top-0 z-30 px-4 sm:px-6 py-4 flex justify-between items-center backdrop-blur-xl border-b transition-all",
             theme === "dark"
               ? "border-orange-500/30 bg-slate-900/85"
-              : "border-orange-400/30 bg-white/85"
+              : "border-orange-400/30 bg-white/85",
           )}
-          style={{
-            backdropFilter: "blur(12px)",
-          }}
+          style={{ backdropFilter: "blur(12px)" }}
         >
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl flex items-center justify-center text-primary-foreground bg-primary shadow-lg">
@@ -1101,6 +2027,15 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
             </h1>
           </div>
           <div className="flex gap-2">
+            {installPrompt && (
+              <button
+                onClick={handleInstallPWA}
+                className="w-10 h-10 rounded-xl flex items-center justify-center bg-accent animate-pulse"
+                title="Instalar App"
+              >
+                <Smartphone size={20} className="text-primary" />
+              </button>
+            )}
             <button
               onClick={toggleTheme}
               className="w-10 h-10 rounded-xl flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-all"
@@ -1118,7 +2053,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
           </div>
         </header>
 
-        {/* Warning Banner */}
         {!isProfileComplete && isProfileWarningVisible && (
           <div className="mx-4 mt-4 p-4 rounded-2xl flex justify-between items-center bg-orange-500/10 dark:bg-orange-500/10 border border-orange-500/30 dark:border-orange-500/30 shadow-lg">
             <div className="flex items-center gap-3">
@@ -1150,14 +2084,16 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
               <Loading size="lg" variant="spinner" text="Enviando imagem..." />
             </div>
           )}
-          <ProfileHeaderCard
-            driver={driverWithLocalStatus}
-            isUploading={isUploading}
-            onEditClick={() => fileInputRef.current?.click()}
-            activeCall={activeCallForDriver}
-            theme={theme}
-            currentDateTime={currentDateTime}
-          />
+          <div id="weather-card-container">
+            <ProfileHeaderCard
+              driver={driverWithLocalStatus}
+              isUploading={isUploading}
+              onEditClick={() => fileInputRef.current?.click()}
+              activeCall={activeCallForDriver}
+              theme={theme}
+              currentDateTime={currentDateTime}
+            />
+          </div>
           <input
             type="file"
             ref={fileInputRef}
@@ -1166,47 +2102,82 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
             accept="image/*"
           />
 
-          {/* TABS NAVIGATION MODERNAS */}
           <div
             className={cn(
               "p-1.5 rounded-2xl flex justify-between overflow-x-auto scrollbar-hide border shadow-lg transition-all duration-300",
               theme === "light"
                 ? "bg-white/80 backdrop-blur-xl border-orange-200/50"
-                : "bg-slate-900/40 backdrop-blur-xl border-orange-500/30"
+                : "bg-slate-900/40 backdrop-blur-xl border-orange-500/30",
             )}
           >
-            {TABS.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id as TabId)}
-                className={cn(
-                  "flex-1 flex flex-col items-center py-3 px-2 rounded-xl text-[10px] sm:text-xs uppercase font-bold tracking-wide min-w-[60px] sm:min-w-[80px] transition-all duration-300 ease-in-out",
-                  activeTab === tab.id
-                    ? "text-white bg-primary shadow-lg scale-105"
-                    : theme === "light"
-                    ? "text-slate-700 hover:text-slate-900 hover:bg-orange-50/80"
-                    : "text-slate-300 hover:text-white hover:bg-orange-500/20"
-                )}
-              >
-                <div className="transition-transform duration-300">
-                  {React.cloneElement(tab.icon, {
-                    size: 20,
-                    className: cn(
-                      "mb-1 transition-all duration-300",
-                      activeTab === tab.id && "scale-110"
-                    ),
-                  })}
-                </div>
-                <span className="hidden sm:inline">{tab.label}</span>
-                <span className="sm:hidden">{tab.label.split(" ")[0]}</span>
-              </button>
-            ))}
+            <TooltipProvider delayDuration={100}>
+              {TABS.map((tab) => {
+                const isDisabled = !isProfileComplete && tab.id !== "profile";
+                return (
+                  <Tooltip key={tab.id}>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          if (isDisabled) {
+                            e.preventDefault();
+                            return;
+                          }
+                          setActiveTab(tab.id as TabId);
+                        }}
+                        className={cn(
+                          "flex-1 flex flex-col items-center py-3 px-2 rounded-xl text-[10px] sm:text-xs uppercase font-bold tracking-wide min-w-[60px] sm:min-w-[80px] transition-all duration-300 ease-in-out",
+                          activeTab === tab.id
+                            ? "text-white bg-primary shadow-lg scale-105"
+                            : theme === "light"
+                              ? "text-slate-700 hover:text-slate-900 hover:bg-orange-50/80"
+                              : "text-slate-300 hover:text-white hover:bg-orange-500/20",
+                          isDisabled &&
+                            "opacity-40 grayscale cursor-not-allowed",
+                        )}
+                      >
+                        <div className="transition-transform duration-300">
+                          {isDisabled ? (
+                            <Lock size={20} className="text-slate-400 mb-1" />
+                          ) : (
+                            React.cloneElement(tab.icon, {
+                              size: 20,
+                              className: cn(
+                                "mb-1 transition-all duration-300",
+                                activeTab === tab.id && "scale-110",
+                              ),
+                            })
+                          )}
+                        </div>
+                        <span className="hidden sm:inline">{tab.label}</span>
+                        <span className="sm:hidden">
+                          {tab.label.split(" ")[0]}
+                        </span>
+                      </button>
+                    </TooltipTrigger>
+                    {isDisabled && (
+                      <TooltipContent
+                        side="top"
+                        className="max-w-xs text-center z-[10000] bg-slate-800 text-white border border-orange-500/50 shadow-xl"
+                      >
+                        <p className="font-bold text-[#EE4D2D] mb-1">
+                          ACESSO RESTRITO 🔒
+                        </p>
+                        <p className="text-xs">
+                          Preencha Nome, Telefone, Hub e Veículo na aba Perfil
+                          para liberar o acesso ao sistema.
+                        </p>
+                      </TooltipContent>
+                    )}
+                  </Tooltip>
+                );
+              })}
+            </TooltipProvider>
           </div>
 
-          {/* TAB CONTENT AREAS */}
           <div className="min-h-[400px]">
             {activeTab === "availability" && (
-              <div className="tab-content-enter">
+              <div className="tab-content-enter tour-availability-switch">
                 <StatusSection
                   driver={driverWithLocalStatus}
                   onAvailabilityChange={handleAvailabilityChange}
@@ -1215,7 +2186,284 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                   onRouteIdSearchChange={setRouteIdSearch}
                   acceptingCallId={acceptingCallId}
                   onAcceptCall={handleAcceptCall}
+                  canAcceptNewCall={canAcceptNewCall}
+                  myIds={myIds}
+                  theme={theme}
                 />
+              </div>
+            )}
+            {activeTab === "map" && (
+              <div className="tour-map-section h-[60vh] rounded-2xl overflow-hidden border border-orange-200/50 shadow-xl relative z-0">
+                <MapContainer
+                  center={[-25.4284, -49.2733]}
+                  zoom={12}
+                  style={{ height: "100%", width: "100%" }}
+                >
+                  <TileLayer
+                    url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+                    attribution='© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                  />
+                  {filteredOpenCalls.map((call) => {
+                    const coords = (call as any).coordinates
+                      ? [
+                          (call as any).coordinates.latitude,
+                          (call as any).coordinates.longitude,
+                        ]
+                      : getMockCoordinates(call.id);
+                    return (
+                      <React.Fragment key={call.id}>
+                        <Circle
+                          center={coords as any}
+                          pathOptions={{
+                            fillColor: "#f97316",
+                            fillOpacity: 0.3,
+                            color: "transparent",
+                          }}
+                          radius={800}
+                        />
+                        <Marker position={coords as any}>
+                          <Popup>
+                            <div className="text-center">
+                              <p className="font-bold text-slate-800">
+                                {call.packageCount} Pacotes
+                              </p>
+                              <p className="text-xs text-slate-500">
+                                {call.routeId}
+                              </p>
+                              {canAcceptNewCall &&
+                                !myIds.includes(call.solicitante?.id) && (
+                                  <Button
+                                    size="sm"
+                                    className="mt-2 w-full h-7 text-xs"
+                                    onClick={() => handleAcceptCall(call.id)}
+                                  >
+                                    Aceitar
+                                  </Button>
+                                )}
+                            </div>
+                          </Popup>
+                        </Marker>
+                      </React.Fragment>
+                    );
+                  })}
+                </MapContainer>
+                <div className="absolute top-2 right-2 bg-white/90 p-2 rounded-lg text-xs z-[1000] shadow-md border">
+                  <p className="font-bold text-slate-700">Legenda</p>
+                  <div className="flex items-center gap-1 mt-1">
+                    <div className="w-3 h-3 rounded-full bg-orange-500/50"></div>
+                    <span>Alta demanda</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === "ranking" && (
+              <div className="tour-ranking-section space-y-6 pb-20">
+                <div className="flex justify-center items-end gap-4 pb-8 pt-4">
+                  {rankedDrivers[1] && (
+                    <div className="flex flex-col items-center">
+                      <div className="w-16 h-16 rounded-full border-4 border-slate-300 overflow-hidden shadow-lg mb-2 relative bg-slate-200">
+                        <img
+                          src={
+                            rankedDrivers[1].avatar ||
+                            `https://avatar.iran.liara.run/public/boy?username=${rankedDrivers[1].name}`
+                          }
+                          onError={(e) => {
+                            e.currentTarget.src = `https://avatar.iran.liara.run/public/boy?username=${rankedDrivers[1].name}`;
+                          }}
+                          className="w-full h-full object-cover"
+                          alt="2º Lugar"
+                        />
+                      </div>
+                      <div className="h-24 w-20 bg-slate-300/90 backdrop-blur-sm rounded-t-xl flex items-end justify-center pb-2 shadow-inner border-t border-white/30">
+                        <span className="text-3xl font-black text-white drop-shadow-md">
+                          2
+                        </span>
+                      </div>
+                      <p className="font-bold text-sm mt-1 text-slate-700 dark:text-slate-200 text-center truncate w-20">
+                        {rankedDrivers[1].name.split(" ")[0]}
+                      </p>
+                      <div className="flex items-center gap-1 bg-slate-200 text-slate-700 px-2 py-0.5 rounded-full text-[10px] font-bold mt-1">
+                        <Star size={10} fill="currentColor" />{" "}
+                        {(rankedDrivers[1] as any).ratingAverage?.toFixed(1) ||
+                          "5.0"}
+                      </div>
+                    </div>
+                  )}
+
+                  {rankedDrivers[0] && (
+                    <div className="flex flex-col items-center z-10 -mb-2">
+                      <div className="relative">
+                        <Trophy
+                          className="absolute -top-8 left-1/2 -translate-x-1/2 text-yellow-400 drop-shadow-xl animate-bounce"
+                          size={40}
+                          fill="currentColor"
+                        />
+                        <div className="w-24 h-24 rounded-full border-4 border-yellow-400 overflow-hidden shadow-2xl mb-2 bg-slate-200 relative">
+                          <img
+                            src={
+                              rankedDrivers[0].avatar ||
+                              `https://avatar.iran.liara.run/public/boy?username=${rankedDrivers[0].name}`
+                            }
+                            onError={(e) => {
+                              e.currentTarget.src = `https://avatar.iran.liara.run/public/boy?username=${rankedDrivers[0].name}`;
+                            }}
+                            className="w-full h-full object-cover"
+                            alt="1º Lugar"
+                          />
+                        </div>
+                      </div>
+                      <div className="h-36 w-28 bg-gradient-to-b from-yellow-400 to-yellow-600 rounded-t-xl flex items-end justify-center pb-4 shadow-xl border-t border-yellow-300 relative overflow-hidden">
+                        <div className="absolute inset-0 bg-white/20 animate-pulse" />
+                        <span className="text-6xl font-black text-white drop-shadow-lg z-10">
+                          1
+                        </span>
+                      </div>
+                      <p className="font-bold text-lg mt-1 text-slate-800 dark:text-white text-center truncate w-28">
+                        {rankedDrivers[0].name.split(" ")[0]}
+                      </p>
+                      <div className="flex items-center gap-1 bg-yellow-100 text-yellow-800 px-3 py-0.5 rounded-full text-xs font-bold mt-1 border border-yellow-200">
+                        <Star size={12} fill="currentColor" />{" "}
+                        {(rankedDrivers[0] as any).ratingAverage?.toFixed(1) ||
+                          "5.0"}
+                      </div>
+                    </div>
+                  )}
+
+                  {rankedDrivers[2] && (
+                    <div className="flex flex-col items-center">
+                      <div className="w-16 h-16 rounded-full border-4 border-orange-400 overflow-hidden shadow-lg mb-2 relative bg-slate-200">
+                        <img
+                          src={
+                            rankedDrivers[2].avatar ||
+                            `https://avatar.iran.liara.run/public/boy?username=${rankedDrivers[2].name}`
+                          }
+                          onError={(e) => {
+                            e.currentTarget.src = `https://avatar.iran.liara.run/public/boy?username=${rankedDrivers[2].name}`;
+                          }}
+                          className="w-full h-full object-cover"
+                          alt="3º Lugar"
+                        />
+                      </div>
+                      <div className="h-20 w-20 bg-orange-400/90 backdrop-blur-sm rounded-t-xl flex items-end justify-center pb-2 shadow-inner border-t border-white/30">
+                        <span className="text-3xl font-black text-white drop-shadow-md">
+                          3
+                        </span>
+                      </div>
+                      <p className="font-bold text-sm mt-1 text-slate-700 dark:text-slate-200 text-center truncate w-20">
+                        {rankedDrivers[2].name.split(" ")[0]}
+                      </p>
+                      <div className="flex items-center gap-1 bg-orange-100 text-orange-800 px-2 py-0.5 rounded-full text-[10px] font-bold mt-1">
+                        <Star size={10} fill="currentColor" />{" "}
+                        {(rankedDrivers[2] as any).ratingAverage?.toFixed(1) ||
+                          "5.0"}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="relative w-full h-80 rounded-3xl border border-orange-500/30 shadow-2xl overflow-hidden group transition-all hover:scale-[1.01]">
+                  {/* LOTTIE ANIMATION BACKGROUND */}
+                  {bgAnimation && (
+                    <div
+                      className={cn(
+                        "absolute inset-0 w-full h-full z-0 pointer-events-none",
+                        theme === "dark" ? "opacity-30" : "opacity-40",
+                      )}
+                    >
+                      <Lottie
+                        animationData={bgAnimation}
+                        loop={true}
+                        rendererSettings={{
+                          preserveAspectRatio: "xMidYMid slice",
+                        }}
+                        className="w-full h-full"
+                        style={{ width: "100%", height: "100%" }}
+                      />
+                    </div>
+                  )}
+
+                  <div
+                    className={cn(
+                      "absolute inset-0 z-0 backdrop-blur-[2px]",
+                      theme === "dark"
+                        ? "bg-gradient-to-t from-slate-900 via-slate-900/80 to-transparent"
+                        : "bg-gradient-to-t from-white via-white/80 to-transparent",
+                    )}
+                  />
+                  <div className="relative z-10 p-6 h-full flex flex-col">
+                    <h3 className="text-lg font-black uppercase mb-4 flex items-center gap-2 tracking-wider">
+                      <Trophy
+                        size={20}
+                        className="text-yellow-500 drop-shadow-md"
+                        fill="currentColor"
+                      />
+                      <span
+                        className={
+                          theme === "dark" ? "text-white" : "text-slate-800"
+                        }
+                      >
+                        Ranking Geral
+                      </span>
+                    </h3>
+                    <div className="flex-1 overflow-y-auto pr-2 space-y-3 custom-scrollbar">
+                      {rankedDrivers.slice(3).map((d, idx) => (
+                        <div
+                          key={d.uid}
+                          className="flex items-center gap-4 p-3 bg-white/10 dark:bg-black/20 backdrop-blur-md rounded-2xl border border-white/10 hover:bg-white/20 transition-all"
+                        >
+                          <span className="w-8 text-center font-black text-xl text-slate-400/80">
+                            {idx + 4}
+                          </span>
+                          <div className="w-12 h-12 rounded-full bg-slate-200 border-2 border-white/20 overflow-hidden">
+                            <img
+                              src={
+                                d.avatar ||
+                                `https://avatar.iran.liara.run/public/boy?username=${d.name}`
+                              }
+                              onError={(e) => {
+                                e.currentTarget.src = `https://avatar.iran.liara.run/public/boy?username=${d.name}`;
+                              }}
+                              className="w-full h-full object-cover"
+                            />
+                          </div>
+                          <div className="flex-1">
+                            <p
+                              className={cn(
+                                "font-bold text-sm",
+                                theme === "dark"
+                                  ? "text-white"
+                                  : "text-slate-900",
+                              )}
+                            >
+                              {d.name}
+                            </p>
+                            <p className="text-xs text-slate-500 capitalize font-medium">
+                              {d.vehicleType || "Carro"}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <div className="flex items-center gap-1 text-yellow-500 font-bold text-sm justify-end drop-shadow-sm">
+                              <Star size={12} fill="currentColor" />{" "}
+                              {((d as any).ratingAverage || 5).toFixed(1)}
+                            </div>
+                            <p className="text-[10px] opacity-70 font-mono">
+                              {(d as any).completedSupports || 0} apoios
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                      {rankedDrivers.length <= 3 && (
+                        <div className="h-full flex flex-col items-center justify-center text-center opacity-50">
+                          <Trophy size={40} className="mb-2 text-slate-400" />
+                          <p className="text-sm">
+                            Ainda não há outros motoristas no ranking.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -1233,20 +2481,34 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     imprevistos. Mínimo de 20 pacotes.
                   </p>
                 </div>
-                <Button
+                <button
+                  type="button"
                   onClick={() => {
+                    if (hasActiveCall) {
+                      showNotification(
+                        "error",
+                        "Acesso Negado",
+                        "Você já tem um apoio em andamento, finalize o primeiro para realizar uma nova solicitação.",
+                      );
+                      return;
+                    }
                     setModalError("");
                     setIsSupportModalOpen(true);
                   }}
-                  className="w-full max-w-sm h-14 text-lg bg-primary hover:bg-primary/90 font-bold shadow-xl shadow-primary/30 rounded-xl text-primary-foreground"
+                  className={cn(
+                    "w-full max-w-sm h-14 text-lg font-bold shadow-xl shadow-primary/30 rounded-xl text-primary-foreground tour-support-button transition-all",
+                    hasActiveCall
+                      ? "bg-primary opacity-50 grayscale cursor-not-allowed hover:bg-primary"
+                      : "bg-primary hover:bg-primary/90",
+                  )}
                 >
                   SOLICITAR SOCORRO
-                </Button>
+                </button>
               </div>
             )}
 
             {activeTab === "activeCalls" && (
-              <div className="tab-content-enter space-y-4">
+              <div className="tab-content-enter space-y-4 tour-history-section">
                 <div className="flex gap-2 overflow-x-auto pb-2">
                   {["all", "inProgress", "requester", "provider"].map((f) => (
                     <button
@@ -1259,21 +2521,21 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                             ? "bg-orange-500/20 text-white border-orange-500/40 shadow-xl transform scale-105"
                             : "bg-orange-50 text-slate-900 border-orange-300 shadow-xl transform scale-105"
                           : theme === "dark"
-                          ? "bg-slate-900/60 text-slate-300 border-orange-500/20 hover:bg-orange-500/10 hover:text-white hover:scale-102"
-                          : "bg-white/60 text-slate-700 border-orange-200/40 hover:bg-orange-50 hover:text-slate-900 hover:scale-102"
+                            ? "bg-slate-900/60 text-slate-300 border-orange-500/20 hover:bg-orange-500/10 hover:text-white hover:scale-102"
+                            : "bg-white/60 text-slate-700 border-orange-200/40 hover:bg-orange-50 hover:text-slate-900 hover:scale-102",
                       )}
                     >
                       {f === "all"
                         ? "Todos"
                         : f === "inProgress"
-                        ? "Em Andamento"
-                        : f === "requester"
-                        ? "Meus Pedidos"
-                        : "Meus Apoios"}
+                          ? "Em Andamento"
+                          : f === "requester"
+                            ? "Meus Pedidos"
+                            : "Meus Apoios"}
                     </button>
                   ))}
                 </div>
-
+                {/* CALENDARIOS */}
                 <div className="flex gap-2 mb-2 flex-wrap items-center">
                   <Popover>
                     <PopoverTrigger asChild>
@@ -1282,7 +2544,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                         className={cn(
                           "h-8 text-xs font-normal justify-start text-left w-[130px] bg-white/80 dark:bg-orange-500/20 border-border dark:border-orange-500/30 text-foreground dark:text-white hover:bg-white dark:hover:bg-orange-500/30 backdrop-blur-xl rounded-xl shadow-lg shadow-black/5 dark:shadow-black/10 transition-all duration-300 ease-in-out hover:scale-105",
                           !startDate &&
-                            "text-muted-foreground dark:text-white/50"
+                            "text-muted-foreground dark:text-white/50",
                         )}
                       >
                         <CalendarIcon className="mr-2 h-3 w-3 transition-transform duration-300 group-hover:rotate-12" />
@@ -1311,7 +2573,8 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                         variant="outline"
                         className={cn(
                           "h-8 text-xs font-normal justify-start text-left w-[130px] bg-white/80 dark:bg-orange-500/20 border-border dark:border-orange-500/30 text-foreground dark:text-white hover:bg-white dark:hover:bg-orange-500/30 backdrop-blur-xl rounded-xl shadow-lg shadow-black/5 dark:shadow-black/10 transition-all duration-300 ease-in-out hover:scale-105",
-                          !endDate && "text-muted-foreground dark:text-white/50"
+                          !endDate &&
+                            "text-muted-foreground dark:text-white/50",
                         )}
                       >
                         <CalendarIcon className="mr-2 h-3 w-3 transition-transform duration-300 group-hover:rotate-12" />
@@ -1335,7 +2598,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     </PopoverContent>
                   </Popover>
                 </div>
-
                 <div className="space-y-3">
                   {filteredCalls.length > 0 ? (
                     filteredCalls.map((call) => (
@@ -1348,6 +2610,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                         onRequestApproval={handleRequestApproval}
                         onCancelSupport={handleCancelSupport}
                         onDeleteSupportRequest={onDeleteSupportRequest}
+                        onRateDriver={handleRateDriver}
                       />
                     ))
                   ) : (
@@ -1373,7 +2636,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                       "grid w-full grid-cols-2 backdrop-blur-xl p-1 rounded-xl h-10 mb-4 border shadow-xl",
                       theme === "dark"
                         ? "bg-slate-900/60 border-orange-500/30"
-                        : "bg-white/80 border-orange-200/50"
+                        : "bg-white/80 border-orange-200/50",
                     )}
                   >
                     <TabsTrigger
@@ -1382,7 +2645,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                         "text-xs data-[state=active]:shadow rounded-lg transition-all",
                         theme === "dark"
                           ? "text-slate-300 data-[state=active]:text-white data-[state=active]:bg-orange-500/20"
-                          : "text-slate-600 data-[state=active]:text-slate-900 data-[state=active]:bg-orange-50"
+                          : "text-slate-600 data-[state=active]:text-slate-900 data-[state=active]:bg-orange-50",
                       )}
                     >
                       Solicitante
@@ -1393,7 +2656,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                         "text-xs data-[state=active]:shadow rounded-lg transition-all",
                         theme === "dark"
                           ? "text-slate-300 data-[state=active]:text-white data-[state=active]:bg-orange-500/20"
-                          : "text-slate-600 data-[state=active]:text-slate-900 data-[state=active]:bg-orange-50"
+                          : "text-slate-600 data-[state=active]:text-slate-900 data-[state=active]:bg-orange-50",
                       )}
                     >
                       Prestador
@@ -1407,7 +2670,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                           "backdrop-blur-xl rounded-2xl p-4 border shadow-xl",
                           theme === "dark"
                             ? "bg-slate-900/60 border-orange-500/30"
-                            : "bg-white/80 border-orange-200/50"
+                            : "bg-white/80 border-orange-200/50",
                         )}
                       >
                         <h4 className="font-bold text-sm mb-2 flex gap-2 items-center text-foreground dark:text-white">
@@ -1428,7 +2691,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                           "backdrop-blur-xl rounded-2xl p-4 border shadow-xl",
                           theme === "dark"
                             ? "bg-slate-900/60 border-orange-500/30"
-                            : "bg-white/80 border-orange-200/50"
+                            : "bg-white/80 border-orange-200/50",
                         )}
                       >
                         <h4 className="font-bold text-sm mb-2 flex gap-2 items-center text-foreground dark:text-white">
@@ -1446,14 +2709,27 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
             )}
 
             {activeTab === "profile" && (
-              <div className="tab-content-enter space-y-6 pb-10">
+              <div className="tab-content-enter space-y-6 pb-10 tour-profile-section">
+                {isProfileEditingLocked && (
+                  <Alert className="bg-orange-500/10 border-[#EE4D2D]/30 shadow-md flex items-center gap-3">
+                    <AlertTriangle className="h-5 w-5 text-[#EE4D2D] shrink-0" />
+                    <AlertDescription className="text-sm font-medium text-foreground dark:text-white leading-relaxed">
+                      <span className="text-[#EE4D2D] font-bold block sm:inline">
+                        Edição Travada:{" "}
+                      </span>
+                      Fique INDISPONÍVEL na aba Status para conseguir alterar
+                      seus dados.
+                    </AlertDescription>
+                  </Alert>
+                )}
+
                 {/* Configurações */}
                 <section
                   className={cn(
                     "rounded-[1.5rem] p-5 border",
                     theme === "dark"
                       ? "bg-slate-900/40 border-orange-500/30 backdrop-blur-sm"
-                      : "bg-white/80 border-orange-200/50"
+                      : "bg-white/80 border-orange-200/50",
                   )}
                   style={
                     theme === "dark"
@@ -1470,7 +2746,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                   <h4
                     className={cn(
                       "text-xs font-bold uppercase mb-4 tracking-wide",
-                      theme === "dark" ? "text-orange-300" : "text-slate-600"
+                      theme === "dark" ? "text-orange-300" : "text-slate-600",
                     )}
                   >
                     Configurações
@@ -1483,10 +2759,10 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                           isMuted
                             ? theme === "dark"
                               ? "text-slate-400 bg-slate-800/80 border border-slate-600/30"
-                              : "text-slate-500 bg-slate-100 border border-slate-300"
+                              : "text-slate-50 bg-slate-100 border border-slate-300"
                             : theme === "dark"
-                            ? "text-emerald-300 bg-emerald-500/20 border border-emerald-400/30"
-                            : "text-emerald-600 bg-emerald-50 border border-emerald-300"
+                              ? "text-emerald-300 bg-emerald-500/20 border border-emerald-400/30"
+                              : "text-emerald-600 bg-emerald-50 border border-emerald-300",
                         )}
                       >
                         {isMuted ? (
@@ -1499,7 +2775,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                         <p
                           className={cn(
                             "font-bold text-sm",
-                            theme === "dark" ? "text-white" : "text-slate-800"
+                            theme === "dark" ? "text-white" : "text-slate-800",
                           )}
                         >
                           Sons de Alerta
@@ -1509,7 +2785,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                             "text-xs",
                             theme === "dark"
                               ? "text-slate-300"
-                              : "text-slate-600"
+                              : "text-slate-600",
                           )}
                         >
                           {isMuted ? "Silenciado" : "Ativado"}
@@ -1528,10 +2804,11 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                 {/* Meus Dados */}
                 <section
                   className={cn(
-                    "rounded-[1.5rem] p-5 space-y-4 border",
+                    "rounded-[1.5rem] p-5 space-y-4 border transition-all",
                     theme === "dark"
                       ? "bg-slate-900/40 border-orange-500/30 backdrop-blur-sm"
-                      : "bg-white/80 border-orange-200/50"
+                      : "bg-white/80 border-orange-200/50",
+                    isProfileEditingLocked && "opacity-60 pointer-events-none",
                   )}
                   style={
                     theme === "dark"
@@ -1548,17 +2825,16 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                   <h4
                     className={cn(
                       "text-xs font-bold uppercase mb-2 tracking-wide",
-                      theme === "dark" ? "text-slate-300" : "text-slate-600"
+                      theme === "dark" ? "text-slate-300" : "text-slate-600",
                     )}
                   >
                     Meus Dados
                   </h4>
-
                   <div className="space-y-1">
                     <label
                       className={cn(
                         "text-xs font-bold",
-                        theme === "dark" ? "text-orange-300" : "text-slate-600"
+                        theme === "dark" ? "text-orange-300" : "text-slate-600",
                       )}
                     >
                       ID Motorista
@@ -1566,7 +2842,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     <div
                       className={cn(
                         "p-4 rounded-xl text-sm font-mono flex justify-between items-center",
-                        theme === "dark" ? "text-orange-200" : "text-slate-700"
+                        theme === "dark" ? "text-orange-200" : "text-slate-700",
                       )}
                       style={{
                         background:
@@ -1579,7 +2855,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                             : "1px solid rgba(255, 168, 50, 0.3)",
                       }}
                     >
-                      {shopeeId}
+                      {shopeeId}{" "}
                       <Lock
                         size={14}
                         className={
@@ -1591,11 +2867,12 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     </div>
                   </div>
 
+                  {/* CAMPO DE HUB */}
                   <div className="space-y-1">
                     <label
                       className={cn(
                         "text-xs font-bold",
-                        theme === "dark" ? "text-orange-300" : "text-slate-600"
+                        theme === "dark" ? "text-orange-300" : "text-slate-600",
                       )}
                     >
                       Hub
@@ -1603,6 +2880,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     <div className="relative">
                       <input
                         type="text"
+                        disabled={isProfileEditingLocked}
                         value={hubSearch}
                         onChange={(e) => {
                           setHubSearch(e.target.value);
@@ -1610,10 +2888,10 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                         }}
                         onFocus={() => setIsHubDropdownOpen(true)}
                         className={cn(
-                          "w-full p-4 rounded-xl text-sm font-medium border focus:ring-2 focus:ring-orange-500/50 outline-none transition-all",
+                          "w-full p-4 rounded-xl text-sm font-medium border focus:ring-2 focus:ring-orange-500/50 outline-none transition-all disabled:opacity-50",
                           theme === "dark"
                             ? "bg-orange-500/20 border-orange-500/30 text-white placeholder:text-slate-400"
-                            : "bg-orange-50/80 border-orange-200/50 text-slate-800 placeholder:text-slate-500"
+                            : "bg-orange-50/80 border-orange-200/50 text-slate-800 placeholder:text-slate-500",
                         )}
                         placeholder="Pesquisar Hub..."
                       />
@@ -1623,7 +2901,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                             "absolute z-10 w-full mt-2 rounded-xl max-h-48 overflow-y-auto border",
                             theme === "dark"
                               ? "bg-slate-900/98 border-orange-500/40 backdrop-blur-xl"
-                              : "bg-white border-orange-200/50"
+                              : "bg-white border-orange-200/50",
                           )}
                           style={{
                             boxShadow:
@@ -1639,7 +2917,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                                 "p-3 cursor-pointer text-sm transition-colors first:rounded-t-xl last:rounded-b-xl",
                                 theme === "dark"
                                   ? "text-slate-300 hover:text-white hover:bg-orange-500/20"
-                                  : "text-slate-700 hover:text-slate-900 hover:bg-orange-50"
+                                  : "text-slate-700 hover:text-slate-900 hover:bg-orange-50",
                               )}
                               onClick={() => {
                                 setHub(h);
@@ -1655,21 +2933,70 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     </div>
                   </div>
 
+                  {/* CAMPO DE SEXO (NOVO) */}
                   <div className="space-y-1">
                     <label
                       className={cn(
                         "text-xs font-bold",
-                        theme === "dark" ? "text-orange-300" : "text-slate-600"
+                        theme === "dark" ? "text-orange-300" : "text-slate-600",
+                      )}
+                    >
+                      Sexo
+                    </label>
+                    <select
+                      value={gender}
+                      disabled={isProfileEditingLocked}
+                      onChange={(e) => setGender(e.target.value)}
+                      className={cn(
+                        "w-full p-4 rounded-xl text-sm font-medium capitalize focus:ring-2 focus:ring-orange-500/50 outline-none transition-all appearance-none cursor-pointer disabled:opacity-50",
+                        theme === "dark" ? "text-white" : "text-slate-800",
+                      )}
+                      style={{
+                        background:
+                          theme === "dark"
+                            ? "rgba(254, 95, 47, 0.15)"
+                            : "rgba(255, 168, 50, 0.15)",
+                        border:
+                          theme === "dark"
+                            ? "1px solid rgba(254, 95, 47, 0.3)"
+                            : "1px solid rgba(255, 168, 50, 0.3)",
+                      }}
+                    >
+                      <option
+                        value="Homem"
+                        className={
+                          theme === "dark" ? "bg-slate-900" : "bg-white"
+                        }
+                      >
+                        Homem
+                      </option>
+                      <option
+                        value="Mulher"
+                        className={
+                          theme === "dark" ? "bg-slate-900" : "bg-white"
+                        }
+                      >
+                        Mulher
+                      </option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label
+                      className={cn(
+                        "text-xs font-bold",
+                        theme === "dark" ? "text-orange-300" : "text-slate-600",
                       )}
                     >
                       Veículo
                     </label>
                     <select
                       value={vehicleType}
+                      disabled={isProfileEditingLocked}
                       onChange={(e) => setVehicleType(e.target.value)}
                       className={cn(
-                        "w-full p-4 rounded-xl text-sm font-medium capitalize focus:ring-2 focus:ring-orange-500/50 outline-none transition-all appearance-none cursor-pointer",
-                        theme === "dark" ? "text-white" : "text-slate-800"
+                        "w-full p-4 rounded-xl text-sm font-medium capitalize focus:ring-2 focus:ring-orange-500/50 outline-none transition-all appearance-none cursor-pointer disabled:opacity-50",
+                        theme === "dark" ? "text-white" : "text-slate-800",
                       )}
                       style={{
                         background:
@@ -1695,24 +3022,24 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                       ))}
                     </select>
                   </div>
-
                   <div className="space-y-1">
                     <label
                       className={cn(
                         "text-xs font-bold",
-                        theme === "dark" ? "text-orange-300" : "text-slate-600"
+                        theme === "dark" ? "text-orange-300" : "text-slate-600",
                       )}
                     >
                       Nome
                     </label>
                     <input
                       value={name}
+                      disabled={isProfileEditingLocked}
                       onChange={(e) => setName(e.target.value)}
                       className={cn(
-                        "w-full p-4 rounded-xl text-sm focus:ring-2 focus:ring-orange-500/50 outline-none transition-all",
+                        "w-full p-4 rounded-xl text-sm focus:ring-2 focus:ring-orange-500/50 outline-none transition-all disabled:opacity-50",
                         theme === "dark"
                           ? "text-white placeholder:text-slate-400"
-                          : "text-slate-800 placeholder:text-slate-500"
+                          : "text-slate-800 placeholder:text-slate-500",
                       )}
                       style={{
                         background:
@@ -1726,24 +3053,24 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                       }}
                     />
                   </div>
-
                   <div className="space-y-1">
                     <label
                       className={cn(
                         "text-xs font-bold",
-                        theme === "dark" ? "text-orange-300" : "text-slate-600"
+                        theme === "dark" ? "text-orange-300" : "text-slate-600",
                       )}
                     >
                       Telefone
                     </label>
                     <input
                       value={formatPhoneNumber(phone)}
+                      disabled={isProfileEditingLocked}
                       onChange={(e) => setPhone(e.target.value)}
                       className={cn(
-                        "w-full p-4 rounded-xl text-sm focus:ring-2 focus:ring-orange-500/50 outline-none transition-all",
+                        "w-full p-4 rounded-xl text-sm focus:ring-2 focus:ring-orange-500/50 outline-none transition-all disabled:opacity-50",
                         theme === "dark"
                           ? "text-white placeholder:text-slate-400"
-                          : "text-slate-800 placeholder:text-slate-500"
+                          : "text-slate-800 placeholder:text-slate-500",
                       )}
                       style={{
                         background:
@@ -1757,12 +3084,12 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                       }}
                     />
                   </div>
-
                   <button
                     onClick={handleUpdateProfile}
+                    disabled={isProfileEditingLocked}
                     className={cn(
-                      "w-full py-4 mt-2 rounded-xl font-bold text-sm transition-all hover:opacity-90",
-                      theme === "dark" ? "text-white" : "text-white"
+                      "w-full py-4 mt-2 rounded-xl font-bold text-sm transition-all hover:opacity-90 disabled:opacity-50",
+                      theme === "dark" ? "text-white" : "text-white",
                     )}
                     style={{
                       background:
@@ -1777,10 +3104,11 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                 {/* Segurança */}
                 <section
                   className={cn(
-                    "rounded-[1.5rem] p-5 space-y-4 border",
+                    "rounded-[1.5rem] p-5 space-y-4 border transition-all",
                     theme === "dark"
                       ? "bg-slate-900/40 border-orange-500/30 backdrop-blur-sm"
-                      : "bg-white/80 border-orange-200/50"
+                      : "bg-white/80 border-orange-200/50",
+                    isProfileEditingLocked && "opacity-60 pointer-events-none",
                   )}
                   style={
                     theme === "dark"
@@ -1797,24 +3125,24 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                   <h4
                     className={cn(
                       "text-xs font-bold uppercase mb-2 tracking-wide",
-                      theme === "dark" ? "text-orange-300" : "text-slate-600"
+                      theme === "dark" ? "text-orange-300" : "text-slate-600",
                     )}
                   >
                     Segurança
                   </h4>
-
                   <div className="space-y-3">
                     <div className="relative">
                       <input
                         type={showPassword ? "text" : "password"}
                         value={newPassword}
+                        disabled={isProfileEditingLocked}
                         onChange={(e) => setNewPassword(e.target.value)}
                         placeholder="Nova Senha"
                         className={cn(
-                          "w-full p-4 rounded-xl text-sm focus:ring-2 focus:ring-orange-500/50 outline-none transition-all",
+                          "w-full p-4 rounded-xl text-sm border pr-12 disabled:opacity-50",
                           theme === "dark"
-                            ? "text-white placeholder:text-slate-400 bg-orange-500/10 border border-orange-500/30"
-                            : "text-slate-800 placeholder:text-slate-500 bg-orange-50/50 border border-orange-200/50"
+                            ? "bg-slate-700 border-slate-600 text-white placeholder:text-white/50"
+                            : "bg-white border-slate-300 text-slate-900",
                         )}
                       />
                       <button
@@ -1824,7 +3152,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                           "absolute right-4 top-4 transition-colors",
                           theme === "dark"
                             ? "text-slate-400 hover:text-white"
-                            : "text-slate-500 hover:text-slate-700"
+                            : "text-slate-500 hover:text-slate-700",
                         )}
                       >
                         {showPassword ? (
@@ -1837,33 +3165,149 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     <input
                       type={showPassword ? "text" : "password"}
                       value={confirmPassword}
+                      disabled={isProfileEditingLocked}
                       onChange={(e) => setConfirmPassword(e.target.value)}
                       placeholder="Confirmar Nova Senha"
                       className={cn(
-                        "w-full p-4 rounded-xl text-sm focus:ring-2 focus:ring-orange-500/50 outline-none transition-all",
+                        "w-full p-4 rounded-xl text-sm border disabled:opacity-50",
                         theme === "dark"
-                          ? "text-white placeholder:text-slate-400 bg-orange-500/10 border border-orange-500/30"
-                          : "text-slate-800 placeholder:text-slate-500 bg-orange-50/50 border border-orange-200/50"
+                          ? "bg-slate-700 border-slate-600 text-white placeholder:text-white/50"
+                          : "bg-white border-slate-300 text-slate-900",
                       )}
                     />
                     <button
                       onClick={handleChangePassword}
+                      disabled={
+                        !newPassword ||
+                        !confirmPassword ||
+                        isProfileEditingLocked
+                      }
                       className={cn(
-                        "w-full py-4 rounded-xl text-sm font-medium transition-all border",
+                        "w-full py-4 rounded-xl text-sm font-medium border transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
                         theme === "dark"
-                          ? "text-slate-300 hover:text-white bg-slate-800/50 border-orange-500/30 hover:bg-orange-500/10"
-                          : "text-slate-700 hover:text-slate-900 bg-white border-orange-200/50 hover:bg-orange-50"
+                          ? "border-slate-600 text-white bg-slate-700 hover:bg-slate-600"
+                          : "border-slate-300 text-slate-700 bg-white hover:bg-slate-50",
                       )}
                     >
                       Atualizar Senha
                     </button>
                   </div>
                 </section>
+
+                {/* Avaliações Recebidas */}
+                {(driver as any).ratingCount > 0 && (
+                  <section
+                    className={cn(
+                      "rounded-[1.5rem] p-5 space-y-4 border",
+                      theme === "dark"
+                        ? "bg-slate-900/40 border-orange-500/30 backdrop-blur-sm"
+                        : "bg-white/80 border-orange-200/50",
+                    )}
+                    style={
+                      theme === "dark"
+                        ? {
+                            boxShadow:
+                              "0 25px 50px -12px rgba(254, 95, 47, 0.3), inset 0 1px 0 0 rgba(254, 95, 47, 0.1)",
+                          }
+                        : {
+                            boxShadow:
+                              "0 25px 50px -12px rgba(254, 95, 47, 0.15)",
+                          }
+                    }
+                  >
+                    <h4
+                      className={cn(
+                        "text-xs font-bold uppercase mb-2 tracking-wide",
+                        theme === "dark" ? "text-orange-300" : "text-slate-600",
+                      )}
+                    >
+                      Minhas Avaliações
+                    </h4>
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span
+                          className={cn(
+                            "text-xs font-bold",
+                            theme === "dark" ? "text-white" : "text-slate-800",
+                          )}
+                        >
+                          Média Geral
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <StarRating
+                            rating={Math.round(
+                              (driver as any).ratingAverage || 0,
+                            )}
+                            readOnly
+                          />
+                          <span
+                            className={cn(
+                              "text-xs font-mono font-bold",
+                              theme === "dark"
+                                ? "text-yellow-300"
+                                : "text-yellow-700",
+                            )}
+                          >
+                            {((driver as any).ratingAverage || 0).toFixed(1)}
+                          </span>
+                        </div>
+                      </div>
+                      {[
+                        { label: "Atendimento", key: "ratingAtendimentoAvg" },
+                        { label: "Agilidade", key: "ratingAgilidadeAvg" },
+                        {
+                          label: "Educação e Respeito",
+                          key: "ratingEducacaoAvg",
+                        },
+                      ].map(({ label, key }) => {
+                        const val = (driver as any)[key];
+                        if (!val) return null;
+                        return (
+                          <div
+                            key={key}
+                            className="flex items-center justify-between"
+                          >
+                            <span
+                              className={cn(
+                                "text-[11px] font-medium",
+                                theme === "dark"
+                                  ? "text-white/70"
+                                  : "text-slate-600",
+                              )}
+                            >
+                              {label}
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <StarRating rating={Math.round(val)} readOnly />
+                              <span
+                                className={cn(
+                                  "text-[11px] font-mono",
+                                  theme === "dark"
+                                    ? "text-yellow-300"
+                                    : "text-yellow-700",
+                                )}
+                              >
+                                {val.toFixed(1)}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      <p
+                        className={cn(
+                          "text-[10px] text-right",
+                          theme === "dark" ? "text-white/40" : "text-slate-400",
+                        )}
+                      >
+                        Baseado em {(driver as any).ratingCount || 0} avaliações
+                      </p>
+                    </div>
+                  </section>
+                )}
               </div>
             )}
           </div>
-
-          {/* SUPPORT MODAL */}
+          {/* ... MODAIS ... */}
           {isSupportModalOpen && (
             <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4">
               <div
@@ -1906,9 +3350,43 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                         ))}
                       </select>
                     </div>
+
                     <div>
-                      <label className="text-xs font-bold text-white/70 uppercase mb-1 block">
-                        Motivo
+                      <label className="text-xs font-bold text-white/70 uppercase mb-1 flex items-center justify-between">
+                        Localização
+                        <button
+                          type="button"
+                          onClick={handleGetLocation}
+                          className="text-primary hover:text-primary/80 transition-colors flex items-center justify-center p-1 rounded-lg hover:bg-white/5"
+                          title="Usar localização atual"
+                        >
+                          <MapPin size={20} />
+                        </button>
+                      </label>
+                      <input
+                        value={location}
+                        onChange={(e) => setLocation(e.target.value)}
+                        className="w-full p-3 bg-slate-700/90 backdrop-blur-xl border border-slate-600/50 rounded-xl text-sm text-white placeholder:text-white/50 focus:ring-2 focus:ring-primary outline-none shadow-lg shadow-black/10"
+                        placeholder="Digite o endereço ou use o botão de GPS"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-bold text-white/70 uppercase mb-1 flex items-center justify-between">
+                        Motivo{" "}
+                        <button
+                          type="button"
+                          onClick={() => handleVoiceInput("reason", setReason)}
+                          className={cn(
+                            "p-1 rounded-full transition-colors",
+                            isListening
+                              ? "bg-red-500 text-white animate-pulse"
+                              : "text-primary hover:bg-primary/20",
+                          )}
+                        >
+                          <Mic size={14} />
+                        </button>
                       </label>
                       <select
                         value={reason}
@@ -1927,8 +3405,22 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                       </select>
                     </div>
                     <div>
-                      <label className="text-xs font-bold text-white/70 uppercase mb-1 block">
-                        Detalhes
+                      <label className="text-xs font-bold text-white/70 uppercase mb-1 flex items-center justify-between">
+                        Detalhes{" "}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleVoiceInput("description", setDescription)
+                          }
+                          className={cn(
+                            "p-1 rounded-full transition-colors",
+                            isListening
+                              ? "bg-red-500 text-white animate-pulse"
+                              : "text-primary hover:bg-primary/20",
+                          )}
+                        >
+                          <Mic size={14} />
+                        </button>
                       </label>
                       <textarea
                         value={description}
@@ -1970,7 +3462,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     </div>
                     <div>
                       <label className="text-xs font-bold text-white/70 uppercase mb-1 flex justify-between">
-                        Regiões
+                        Regiões{" "}
                         <button
                           type="button"
                           onClick={() => handleAddField(setDeliveryRegions)}
@@ -1987,7 +3479,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                               handleFieldChange(
                                 idx,
                                 e.target.value,
-                                setDeliveryRegions
+                                setDeliveryRegions,
                               )
                             }
                             className="flex-1 p-2 bg-slate-700/90 backdrop-blur-xl border border-slate-600/50 rounded-xl text-sm text-white placeholder:text-white/50 focus:ring-2 focus:ring-[#FA4F26] outline-none shadow-lg shadow-black/10"
@@ -2009,7 +3501,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     </div>
                     <div>
                       <label className="text-xs font-bold text-white/70 uppercase mb-1 flex justify-between">
-                        Veículos Necessários
+                        Veículos Necessários{" "}
                         <button
                           type="button"
                           onClick={() => handleAddField(setNeededVehicles)}
@@ -2026,7 +3518,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                               handleFieldChange(
                                 idx,
                                 e.target.value,
-                                setNeededVehicles
+                                setNeededVehicles,
                               )
                             }
                             className="flex-1 p-2 bg-orange-500/20 backdrop-blur-xl border border-orange-500/30 rounded-xl text-sm capitalize text-white focus:ring-2 focus:ring-[#FA4F26] outline-none shadow-lg shadow-black/10"
@@ -2058,93 +3550,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                         </div>
                       ))}
                     </div>
-
-                    <div>
-                      <label className="text-xs font-bold text-white/70 uppercase mb-1 block">
-                        Localização
-                      </label>
-                      <div className="flex gap-2">
-                        <input
-                          value={location}
-                          onChange={(e) => setLocation(e.target.value)}
-                          className="flex-1 p-3 bg-orange-500/20 backdrop-blur-xl border border-orange-500/30 rounded-xl text-sm text-white placeholder:text-white/50 focus:ring-2 focus:ring-[#FA4F26] outline-none shadow-lg shadow-black/10"
-                          placeholder="Link do Maps ou endereço"
-                          required
-                        />
-                        <button
-                          type="button"
-                          onClick={handleGetLocation}
-                          className="p-3 bg-blue-500/20 text-blue-300 rounded-xl border border-blue-400/30 hover:bg-blue-500/30 transition-colors shadow-lg shadow-black/10"
-                        >
-                          {isLocating ? (
-                            <Loading size="sm" variant="spinner" />
-                          ) : (
-                            <NavigationIcon size={20} />
-                          )}
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Upload de Foto da Carga */}
-                    <div>
-                      <label className="text-xs font-bold text-white/70 uppercase mb-2 block flex items-center gap-2">
-                        <ImageIcon size={16} className="text-primary" />
-                        Foto da Carga
-                        <span className="text-[10px] text-white/50 normal-case font-normal">
-                          (Opcional - Máx. 5MB)
-                        </span>
-                      </label>
-                      <div className="space-y-2">
-                        {cargoPhotoPreview ? (
-                          <div className="relative">
-                            <img
-                              src={cargoPhotoPreview}
-                              alt="Preview da carga"
-                              className="w-full h-48 object-cover rounded-xl border-2 border-primary/50 shadow-lg"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setCargoPhoto(null);
-                                setCargoPhotoPreview(null);
-                              }}
-                              className="absolute top-2 right-2 p-2 bg-red-500/90 hover:bg-red-600 text-white rounded-full shadow-lg transition-colors"
-                            >
-                              <XIcon size={16} />
-                            </button>
-                          </div>
-                        ) : (
-                          <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-primary/50 rounded-xl cursor-pointer bg-primary/10 hover:bg-primary/20 transition-colors group">
-                            <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                              <ImageIcon
-                                size={32}
-                                className="text-primary mb-2 group-hover:scale-110 transition-transform"
-                              />
-                              <p className="text-sm font-semibold text-white mb-1">
-                                Clique para adicionar foto
-                              </p>
-                              <p className="text-xs text-white/70">
-                                JPG, PNG ou GIF (máx. 5MB)
-                              </p>
-                            </div>
-                            <input
-                              type="file"
-                              accept="image/*"
-                              onChange={handleCargoPhotoChange}
-                              className="hidden"
-                              disabled={isUploadingPhoto}
-                            />
-                          </label>
-                        )}
-                        {isUploadingPhoto && (
-                          <div className="flex items-center justify-center gap-2 text-white/70 text-sm">
-                            <Loading size="sm" variant="spinner" />
-                            <span>Enviando foto...</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
                     {modalError && (
                       <p className="text-red-300 text-xs font-bold text-center bg-red-500/20 backdrop-blur-xl p-2 rounded-xl border border-red-400/30">
                         {modalError}
@@ -2170,48 +3575,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
             </div>
           )}
 
-          {/* REAUTH MODAL */}
-          {isReauthModalOpen && (
-            <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-slate-900/90 backdrop-blur-sm animate-in fade-in">
-              <div className="bg-slate-800/95 backdrop-blur-2xl rounded-3xl p-6 w-full max-w-sm shadow-2xl shadow-black/40 border border-orange-500/30">
-                <h3 className="font-bold text-lg mb-4 text-white">
-                  Confirme sua senha atual
-                </h3>
-                <input
-                  type="password"
-                  value={currentPassword}
-                  onChange={(e) => setCurrentPassword(e.target.value)}
-                  className="w-full p-3 bg-slate-700/90 backdrop-blur-xl border border-slate-600/50 rounded-xl mb-2 text-white placeholder:text-white/50 focus:ring-2 focus:ring-[#FA4F26] outline-none shadow-lg shadow-black/10"
-                  placeholder="Senha atual"
-                />
-                {reauthError && (
-                  <p className="text-red-300 text-xs mb-2">{reauthError}</p>
-                )}
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => setIsReauthModalOpen(false)}
-                    className="flex-1 border-slate-600/50 text-white hover:bg-slate-700/90 hover:text-white backdrop-blur-xl rounded-xl"
-                  >
-                    Cancelar
-                  </Button>
-                  <Button
-                    onClick={handleReauthenticateAndChange}
-                    disabled={isReauthenticating}
-                    className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl shadow-lg shadow-primary/30"
-                  >
-                    {isReauthenticating ? (
-                      <Loading size="sm" variant="spinner" />
-                    ) : (
-                      "Confirmar"
-                    )}
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* SUCCESS MODAL */}
           {showSuccessModal && (
             <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-slate-900/90 backdrop-blur-sm animate-in fade-in">
               <div className="bg-slate-800/95 backdrop-blur-2xl rounded-3xl p-8 text-center max-w-sm w-full shadow-2xl shadow-black/40 border border-orange-500/30">
@@ -2221,13 +3584,9 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                 <h2 className="text-2xl font-bold text-white mb-2">
                   Recebido!
                 </h2>
-                <p className="text-white/70 mb-6">
-                  Sua solicitação está visível no painel. Aguarde um monitor
-                  aceitar.
-                </p>
                 <Button
                   onClick={() => setShowSuccessModal(false)}
-                  className="w-full bg-[#FA4F26] hover:bg-[#EE4D2D] text-white h-12 font-bold rounded-xl shadow-xl shadow-orange-500/30"
+                  className="w-full mt-4"
                 >
                   Entendido
                 </Button>
@@ -2235,6 +3594,10 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
             </div>
           )}
         </main>
+        <div
+          id="chatbot-tour-target"
+          className="fixed bottom-0 right-0 w-20 h-20 pointer-events-none z-0"
+        />
         <Chatbot />
       </div>
     </>

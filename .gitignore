@@ -47,3 +47,6 @@ dist/
 # Misc
 .turbo
 *.tsbuildinfo
+
+.vercel
+.env*.local

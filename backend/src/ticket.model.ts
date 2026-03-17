@@ -1,6 +1,4 @@
 import mongoose, { Document, Schema } from "mongoose";
-// Se o import abaixo der erro de caminho, verifique se o caminho relativo está correto
-// ou use 'any' temporariamente se o arquivo de types não estiver acessível ao backend
 import type { UrgencyLevel, CallStatus } from "../../src/types/logistics";
 
 // --- Schema para o objeto aninhado 'solicitante' ---
@@ -13,17 +11,19 @@ const SolicitanteSchema: Schema = new Schema(
     phone: { type: String, default: null },
     shopeeId: { type: String, required: false },
   },
-  { _id: false }
+  { _id: false },
 );
 
 // --- Interface para o documento Ticket ---
 export interface ITicket extends Document {
-  // ADIÇÃO CRÍTICA: Tipagem explícita do _id
   _id: mongoose.Types.ObjectId;
+  // ADIÇÃO CRÍTICA: Ponte com o Firebase para evitar o erro "Ticket não possui mongoId"
+  firebaseId: string;
   userId: string;
   prompt: string;
   description: string;
-  reason?: string; // <--- NOVO CAMPO: Motivo da solicitação
+  reason?: string;
+  securityCode?: string;
   createdAt: Date;
   solicitante: {
     id: string;
@@ -47,10 +47,13 @@ export interface ITicket extends Document {
 
 // --- Schema principal do Ticket ---
 const TicketSchema: Schema = new Schema({
+  // ADIÇÃO DO CAMPO NO SCHEMA: Indexado para buscas rápidas durante exclusão/update
+  firebaseId: { type: String, required: true, unique: true, index: true },
   userId: { type: String, required: true },
   prompt: { type: String, required: true },
   description: { type: String, required: true },
-  reason: { type: String, required: false }, // <--- NOVO CAMPO NO SCHEMA
+  reason: { type: String, required: false },
+  securityCode: { type: String, required: false },
   createdAt: { type: Date, default: Date.now },
   solicitante: { type: SolicitanteSchema, required: true },
   location: { type: String, required: true },

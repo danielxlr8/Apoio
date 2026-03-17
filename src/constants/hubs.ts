@@ -3,25 +3,25 @@ export const HUBS = [
   "LM Hub_PR_Maringa",
   "LM Hub_PR_Foz do Iguaçu",
   "LM Hub_PR_Cascavel",
+  "LM Hub_PR_Curitiba",
+  "LM Hub_PR_São José dos Pinhais",
 ] as const;
 
 export type Hub = (typeof HUBS)[number];
 
-// --- ADICIONE ESTA PARTE ABAIXO ---
+export const getCityFromHub = (hubString: string): string => {
+  if (!hubString) return "Curitiba"; // Fallback padrão
 
-export const getCityFromHub = (hubName: string) => {
-  if (!hubName) return "";
+  // Divide a string pelo underline "_"
+  const parts = hubString.split("_");
 
-  // O padrão parece ser: "LM Hub" _ "UF" _ "CIDADE" _ "DETALHE"
-  const parts = hubName.split("_");
-
-  // Se tiver pelo menos 3 partes, a cidade é a terceira parte (índice 2)
+  // O formato é LM Hub_ESTADO_CIDADE_SUFIXO
+  // A cidade está no índice 2
   if (parts.length >= 3) {
-    return parts[2];
+    return parts[2].trim();
   }
 
-  // Se não conseguir separar, retorna o nome original
-  return hubName;
+  return hubString; // Retorna original se não seguir o padrão
 };
 
 export const normalizeHub = (hubValue: string) => {

@@ -6,15 +6,17 @@ import {
   doc,
   getDoc,
   collection,
-  updateDoc,
-  deleteDoc,
   query,
   where,
   getDocs,
-  writeBatch,
-  serverTimestamp,
   setDoc,
+  onSnapshot,
+  orderBy,
+  limit,
+  deleteDoc,
+  updateDoc,
 } from "firebase/firestore";
+import axios from "axios";
 import { AuthPage } from "./components/AuthPage";
 import { AdminDashboard } from "./components/AdminDashboard";
 import { DriverInterface } from "./components/DriverInterface";
@@ -26,13 +28,16 @@ import type {
   SupportCall as OriginalSupportCall,
   Driver,
 } from "./types/logistics";
-import { useSafeFirestore } from "./hooks/useSafeFirestore";
-import { useFirestoreQuery, clearCollectionCache } from "./hooks/useFirestoreQuery";
 import { usePresence } from "./hooks/usePresence";
 import { checkAccessPermission } from "./services/gatekeeper";
 
+// ✅ CONFIGURAÇÃO DA API E SUPERADMIN
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+const GOD_UID = import.meta.env.VITE_SUPERADMIN_UID; // Adicione seu UID no .env
+
 export type SupportCall = OriginalSupportCall & {
   deletedAt?: any;
+  mongoId?: string;
 };
 
 const LogOutIcon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -66,58 +71,91 @@ function App() {
   const [userData, setUserData] = useState<UserData | null>(null);
   const [loading, setLoading] = useState(true);
   const [isAdminUnverified, setIsAdminUnverified] = useState(false);
+  const [calls, setCalls] = useState<SupportCall[]>([]);
+  const [callsLoading, setCallsLoading] = useState(true);
+  const [callsError, setCallsError] = useState<Error | null>(null);
 
-  // ========================================
-  // NOVA IMPLEMENTAÇÃO COM useFirestoreQuery (SIMPLIFICADO)
-  // ========================================
-  
-  // Hook para chamados - simples e rápido
-  const {
-    data: calls,
-    loading: callsLoading,
-    error: callsError,
-    refresh: refreshCalls,
-  } = useFirestoreQuery<SupportCall>({
-    collectionName: "supportCalls",
-    orderByField: "createdAt",
-    orderDirection: "desc",
-    limitCount: 100,
-    enableCache: true,
-    cacheDuration: 2 * 60 * 1000, // 2 minutos
-  });
+  // ✅ CONSTANTE DEUS: Identifica se você é o SuperAdmin
+  const isGod = user?.uid === GOD_UID;
 
-  // Hook para motoristas - simples e rápido
-  const {
-    data: drivers,
-    loading: driversLoading,
-    error: driversError,
-    refresh: refreshDrivers,
-  } = useFirestoreQuery<Driver>({
-    collectionName: "motoristas_pre_aprovados",
-    orderByField: "name",
-    orderDirection: "asc",
-    limitCount: 200,
-    enableCache: true,
-    cacheDuration: 5 * 60 * 1000, // 5 minutos
-  });
+  useEffect(() => {
+    setCallsLoading(true);
+    const q = query(
+      collection(db, "supportCalls"),
+      orderBy("timestamp", "desc"),
+      limit(100),
+    );
 
-  // ========================================
-  // ATIVA PRESENÇA DO USUÁRIO (para contador online)
-  // ========================================
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const callsData = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        })) as SupportCall[];
+        setCalls(callsData);
+        setCallsLoading(false);
+        setCallsError(null);
+      },
+      (error) => {
+        console.error("Erro ao carregar chamados:", error);
+        setCallsError(error as Error);
+        setCallsLoading(false);
+      },
+    );
+    return () => unsubscribe();
+  }, []);
+
+  const refreshCalls = () => {
+    console.log("Chamados já estão em tempo real");
+  };
+
+  const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [driversLoading, setDriversLoading] = useState(true);
+  const [driversError, setDriversError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    setDriversLoading(true);
+    const q = query(
+      collection(db, "motoristas_pre_aprovados"),
+      orderBy("name", "asc"),
+      limit(200),
+    );
+
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const driversData = snapshot.docs.map((doc) => ({
+          uid: doc.id,
+          ...doc.data(),
+        })) as Driver[];
+        setDrivers(driversData);
+        setDriversLoading(false);
+        setDriversError(null);
+      },
+      (error) => {
+        console.error("Erro ao carregar motoristas:", error);
+        setDriversError(error as Error);
+        setDriversLoading(false);
+      },
+    );
+    return () => unsubscribe();
+  }, []);
+
+  const refreshDrivers = () => {
+    console.log("Motoristas já estão em tempo real");
+  };
+
   usePresence(
     user?.uid || null,
     userData?.role || "driver",
     userData ? { name: userData.name, email: userData.email } : null,
-    !!user && !!userData // Só ativa se usuário estiver logado
+    !!user && !!userData,
   );
 
   useEffect(() => {
-    console.log("🔹 Iniciando useEffect de autenticação");
-    
-    // Timeout de segurança: se após 15 segundos ainda estiver carregando, exibe erro
     const safetyTimeout = setTimeout(() => {
       if (loading) {
-        console.error("⚠️ Timeout de segurança atingido. Forçando fim do carregamento.");
         setLoading(false);
         setUser(null);
         setUserData(null);
@@ -125,121 +163,88 @@ function App() {
     }, 15000);
 
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      console.log("🔹 onAuthStateChanged disparado", currentUser ? "COM usuário" : "SEM usuário");
       try {
         setIsAdminUnverified(false);
-
         if (currentUser) {
-          console.log("🔹 Recarregando dados do usuário...");
           await currentUser.reload();
-
-          // ========================================
-          // GATEKEEPER: Verificação de limite de usuários simultâneos
-          // ========================================
-          console.log("🔹 Verificando gatekeeper...");
           const accessCheck = await Promise.race([
             checkAccessPermission(currentUser.email || undefined),
-            new Promise<any>((resolve) => 
-              setTimeout(() => {
-                console.warn("⏱️ Timeout no gatekeeper, permitindo acesso");
-                resolve({ allowed: true });
-              }, 5000)
-            )
+            new Promise<any>((resolve) =>
+              setTimeout(() => resolve({ allowed: true }), 5000),
+            ),
           ]);
 
-          console.log("🔹 Resultado do gatekeeper:", accessCheck);
-
-        if (!accessCheck.allowed) {
-          // Servidor cheio - mostra notificação e faz logout
-          sonnerToast.error("Servidor Cheio", {
-            description: accessCheck.reason || "Tente novamente em instantes.",
-            duration: 5000,
-          });
-
-          console.warn("⛔ Acesso negado - Servidor cheio:", {
-            currentCount: accessCheck.currentCount,
-            maxCount: accessCheck.maxCount,
-          });
-
-          await signOut(auth);
-          setLoading(false);
-          return;
-        }
-
-        console.log("✅ Acesso permitido via Gatekeeper:", {
-          currentCount: accessCheck.currentCount,
-          maxCount: accessCheck.maxCount,
-        });
-
-        console.log("🔹 Começando a buscar dados do usuário...");
-        let resolvedUserData: UserData | null = null;
-
-        if (currentUser.email?.endsWith("@shopee.com")) {
-          if (!currentUser.emailVerified) {
-            setUser(currentUser);
-            setIsAdminUnverified(true);
+          if (!accessCheck.allowed) {
+            sonnerToast.error("Servidor Cheio", {
+              description:
+                accessCheck.reason || "Tente novamente em instantes.",
+              duration: 5000,
+            });
+            await signOut(auth);
             setLoading(false);
             return;
           }
 
-          const adminDocRef = doc(db, "admins_pre_aprovados", currentUser.uid);
-          const adminDocSnap = await getDoc(adminDocRef);
-
-          if (adminDocSnap.exists()) {
-            resolvedUserData = adminDocSnap.data() as UserData;
+          let resolvedUserData: UserData | null = null;
+          if (currentUser.email?.endsWith("@shopee.com")) {
+            if (!currentUser.emailVerified) {
+              setUser(currentUser);
+              setIsAdminUnverified(true);
+              setLoading(false);
+              return;
+            }
+            const adminDocRef = doc(
+              db,
+              "admins_pre_aprovados",
+              currentUser.uid,
+            );
+            const adminDocSnap = await getDoc(adminDocRef);
+            if (adminDocSnap.exists()) {
+              resolvedUserData = adminDocSnap.data() as UserData;
+            } else {
+              const newAdminData: UserData = {
+                uid: currentUser.uid,
+                email: currentUser.email!,
+                name: currentUser.displayName || "Admin Shopee",
+                role: "admin",
+              };
+              await setDoc(adminDocRef, newAdminData);
+              resolvedUserData = newAdminData;
+            }
           } else {
-            const newAdminData: UserData = {
-              uid: currentUser.uid,
-              email: currentUser.email!,
-              name: currentUser.displayName || "Admin Shopee",
-              role: "admin",
-            };
-            await setDoc(adminDocRef, newAdminData);
-            resolvedUserData = newAdminData;
+            const driversRef = collection(db, "motoristas_pre_aprovados");
+            const qUid = query(driversRef, where("uid", "==", currentUser.uid));
+            const qGoogleUid = query(
+              driversRef,
+              where("googleUid", "==", currentUser.uid),
+            );
+            const [uidSnapshot, googleUidSnapshot] = await Promise.all([
+              getDocs(qUid),
+              getDocs(qGoogleUid),
+            ]);
+            const driverDoc = uidSnapshot.docs[0] || googleUidSnapshot.docs[0];
+            if (driverDoc && driverDoc.exists()) {
+              const driverData = driverDoc.data() as Driver;
+              resolvedUserData = {
+                uid: currentUser.uid,
+                email: currentUser.email!,
+                name: driverData.name,
+                role: "driver",
+              };
+            }
           }
-        } else {
-          const driversRef = collection(db, "motoristas_pre_aprovados");
-          const qUid = query(driversRef, where("uid", "==", currentUser.uid));
-          const qGoogleUid = query(
-            driversRef,
-            where("googleUid", "==", currentUser.uid)
-          );
 
-          const [uidSnapshot, googleUidSnapshot] = await Promise.all([
-            getDocs(qUid),
-            getDocs(qGoogleUid),
-          ]);
-
-          const driverDoc = uidSnapshot.docs[0] || googleUidSnapshot.docs[0];
-
-          if (driverDoc && driverDoc.exists()) {
-            const driverData = driverDoc.data() as Driver;
-            resolvedUserData = {
-              uid: currentUser.uid,
-              email: currentUser.email!,
-              name: driverData.name,
-              role: "driver",
-            };
-          }
-        }
-
-        if (resolvedUserData) {
-          setUserData(resolvedUserData);
-          setUser(currentUser);
-        } else {
-          console.error(
-            "Usuário não encontrado ou não autorizado. Fazendo logout."
-          );
-          if (!isAdminUnverified) {
+          if (resolvedUserData) {
+            setUserData(resolvedUserData);
+            setUser(currentUser);
+          } else if (!isAdminUnverified) {
             await signOut(auth);
           }
-        }
         } else {
           setUser(null);
           setUserData(null);
         }
       } catch (error) {
-        console.error("❌ Erro durante autenticação:", error);
         setUser(null);
         setUserData(null);
       } finally {
@@ -247,100 +252,141 @@ function App() {
         clearTimeout(safetyTimeout);
       }
     });
-
     return () => {
       clearTimeout(safetyTimeout);
       unsubscribe();
     };
   }, [isAdminUnverified]);
 
+  // ✅ NOTIFICAÇÕES HUD: De-duplicação e Bypass Deus
+  const activeToasts = new Set<string>();
+  const safeToast = {
+    success: (msg: string, opts?: any) => {
+      if (activeToasts.has(msg)) return;
+      activeToasts.add(msg);
+      sonnerToast.success(msg, {
+        ...opts,
+        onDismiss: () => activeToasts.delete(msg),
+        onAutoClose: () => activeToasts.delete(msg),
+      });
+    },
+    error: (msg: string, opts?: any) => {
+      if (activeToasts.has(msg)) return;
+      activeToasts.add(msg);
+      sonnerToast.error(msg, {
+        ...opts,
+        onDismiss: () => activeToasts.delete(msg),
+        onAutoClose: () => activeToasts.delete(msg),
+      });
+    },
+    info: (msg: string, opts?: any) => {
+      if (activeToasts.has(msg)) return;
+      activeToasts.add(msg);
+      sonnerToast.info(msg, {
+        ...opts,
+        onDismiss: () => activeToasts.delete(msg),
+        onAutoClose: () => activeToasts.delete(msg),
+      });
+    },
+    warning: (msg: string, opts?: any) => {
+      if (activeToasts.has(msg)) return;
+      activeToasts.add(msg);
+      sonnerToast.warning(msg, {
+        ...opts,
+        onDismiss: () => activeToasts.delete(msg),
+        onAutoClose: () => activeToasts.delete(msg),
+      });
+    },
+  };
+
+  // HELPERS PARA API
+  const getAuthHeader = async () => {
+    if (!auth.currentUser) return {};
+    const token = await auth.currentUser.getIdToken(true);
+    return { headers: { Authorization: `Bearer ${token}` } };
+  };
+
+  const findMongoId = (firestoreId: string): string => {
+    const call = calls.find((c) => c.id === firestoreId);
+    if (call?.mongoId) return call.mongoId;
+    return firestoreId;
+  };
+
   const handleUpdateCall = async (
     id: string,
-    updates: Partial<Omit<SupportCall, "id">>
+    updates: Partial<Omit<SupportCall, "id">>,
   ) => {
-    const callDocRef = doc(db, "supportCalls", id);
+    const mongoId = findMongoId(id);
+    if (!mongoId) return;
     try {
-      await updateDoc(callDocRef, updates);
-      // Limpa cache e recarrega
-      clearCollectionCache("supportCalls");
-      refreshCalls();
-    } catch (error) {
-      console.error("Erro ao atualizar chamado: ", error);
+      const config = await getAuthHeader();
+      await axios.patch(`${API_URL}/tickets/${mongoId}`, updates, config);
+      safeToast.success("Atualizado com sucesso");
+    } catch (error: any) {
+      if (error.response?.status === 401 || error.response?.status === 404) {
+        const callDocRef = doc(db, "supportCalls", id);
+        await updateDoc(callDocRef, updates);
+        // ✅ Notificação técnica visível apenas para a Conta Deus
+        if (isGod) safeToast.info("Chamado legado sincronizado localmente.");
+      } else {
+        console.error("Error updating call via API:", error);
+        safeToast.error("Falha ao atualizar chamado.");
+      }
     }
   };
 
   const handleDeleteCall = async (id: string) => {
-    await handleUpdateCall(id, {
-      status: "EXCLUIDO",
-      deletedAt: serverTimestamp(),
-    });
+    await handleUpdateCall(id, { status: "EXCLUIDO" });
   };
 
   const handlePermanentDeleteCall = async (id: string) => {
-    const callDocRef = doc(db, "supportCalls", id);
+    const mongoId = findMongoId(id);
+    if (!mongoId) return;
     try {
-      await deleteDoc(callDocRef);
-      // Limpa cache e recarrega
-      clearCollectionCache("supportCalls");
-      refreshCalls();
-    } catch (error) {
-      console.error("Erro ao excluir chamado permanentemente: ", error);
+      const config = await getAuthHeader();
+      await axios.delete(`${API_URL}/tickets/${mongoId}`, config);
+      safeToast.success("Excluído permanentemente.");
+    } catch (error: any) {
+      if (error.response?.status === 401 || error.response?.status === 404) {
+        const callDocRef = doc(db, "supportCalls", id);
+        await deleteDoc(callDocRef);
+        if (isGod) safeToast.success("Chamado órfão removido do Firebase.");
+      } else {
+        console.error("Error deleting call via API:", error);
+        safeToast.error("Erro ao excluir chamado.");
+      }
     }
   };
 
   const handleDeleteAllExcluded = async () => {
-    const q = query(
-      collection(db, "supportCalls"),
-      where("status", "==", "EXCLUIDO")
-    );
-    const querySnapshot = await getDocs(q);
-    const batch = writeBatch(db);
-    querySnapshot.forEach((doc) => batch.delete(doc.ref));
     try {
-      await batch.commit();
-      // Limpa cache e recarrega
-      clearCollectionCache("supportCalls");
-      refreshCalls();
+      const config = await getAuthHeader();
+      await axios.delete(`${API_URL}/tickets/purge/excluded`, config);
+      safeToast.success("Lixeira esvaziada.");
     } catch (error) {
-      console.error("Erro ao limpar chamados excluídos: ", error);
+      console.error("Error clearing excluded calls via API:", error);
+      safeToast.error("Erro ao limpar lixeira.");
     }
   };
 
   const renderContent = () => {
-    if (loading || callsLoading || driversLoading) {
-      return <LoadingScreen />;
-    }
+    if (loading || callsLoading || driversLoading) return <LoadingScreen />;
+    if (user && isAdminUnverified) return <VerifyEmailPage user={user} />;
+    if (!user || !userData) return <AuthPage />;
 
-    if (user && isAdminUnverified) {
-      return <VerifyEmailPage user={user} />;
-    }
-
-    if (!user || !userData) {
-      return <AuthPage />;
-    }
-
-    // Exibe erros se houver
     if (callsError || driversError) {
       return (
         <div className="flex flex-col items-center justify-center min-h-screen gap-4 p-4">
-          {callsError && (
-            <div className="text-red-600 bg-red-50 p-4 rounded-lg border border-red-200">
-              <p className="font-bold">Erro ao carregar chamados:</p>
-              <p>{callsError}</p>
-            </div>
-          )}
-          {driversError && (
-            <div className="text-red-600 bg-red-50 p-4 rounded-lg border border-red-200">
-              <p className="font-bold">Erro ao carregar motoristas:</p>
-              <p>{driversError}</p>
-            </div>
-          )}
+          <div className="text-red-600 bg-red-50 p-4 rounded-lg border border-red-200">
+            <p className="font-bold">Erro de conexão</p>
+            <p>Verifique sua conexão com o servidor.</p>
+          </div>
           <button
             onClick={() => {
               refreshCalls();
               refreshDrivers();
             }}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg"
           >
             Tentar Novamente
           </button>
@@ -362,23 +408,19 @@ function App() {
               refreshCalls();
               refreshDrivers();
             }}
+            isGod={isGod} // Passando privilégio master
           />
         );
       case "driver":
         const currentUser = auth.currentUser;
         if (!currentUser) return <AuthPage />;
-
         const driverProfile = drivers.find(
-          (d) => d.uid === currentUser.uid || d.googleUid === currentUser.uid
+          (d) => d.uid === currentUser.uid || d.googleUid === currentUser.uid,
         );
-
-        if (driverProfile) {
-          return <DriverInterface driver={driverProfile} />;
-        }
-
+        if (driverProfile) return <DriverInterface driver={driverProfile} />;
         return (
           <div className="flex items-center justify-center h-screen">
-            <p>Carregando perfil do motorista...</p>
+            <p>Carregando perfil...</p>
           </div>
         );
       default:
@@ -389,16 +431,28 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gray-100">
-      <Toaster position="top-right" richColors />
+      {/* ✅ TOASTER CORRIGIDA: Dark theme, botão de fechar e de-duplicação configurada no safeToast */}
+      <Toaster
+        position="top-right"
+        richColors
+        theme="dark"
+        closeButton
+        duration={4000}
+      />
       {user && userData && !isAdminUnverified && (
         <header className="bg-white shadow-md p-4 flex justify-between items-center">
           <div className="text-lg font-semibold text-gray-700">
             Bem-vindo,{" "}
             <span className="font-bold text-orange-600">{userData.name}</span>
+            {isGod && (
+              <span className="ml-2 text-xs text-blue-500 font-mono">
+                [GOD MODE]
+              </span>
+            )}
           </div>
           <button
             onClick={() => signOut(auth)}
-            className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+            className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white font-semibold rounded-lg"
           >
             <LogOutIcon className="h-5 w-5" />
             <span>Sair</span>
