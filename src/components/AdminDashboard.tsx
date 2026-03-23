@@ -44,6 +44,8 @@ import {
   HelpCircle,
   KeyRound,
   Info,
+  Download,
+  BookOpen,
   Map as MapIcon,
   UserCircle,
   Camera,
@@ -597,6 +599,7 @@ const CallDetailsModal = ({
   call,
   onClose,
   onUpdateStatus,
+  onRevertToAberto,
   drivers,
 }: {
   call: SupportCall | null;
@@ -605,24 +608,40 @@ const CallDetailsModal = ({
     id: string,
     updates: Partial<Omit<SupportCall, "id">>,
   ) => void;
+  onRevertToAberto: (call: SupportCall) => void;
   drivers?: Driver[];
 }) => {
   if (!call) return null;
-  const getStatusColor = (status: CallStatus) => {
+
+  const getStatusBadgeStyle = (status: CallStatus) => {
     switch (status) {
       case "ABERTO":
-        return "text-yellow-500";
+        return "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/30";
       case "EM ANDAMENTO":
-        return "text-blue-500";
+        return "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30";
       case "CONCLUIDO":
-        return "text-green-500";
+        return "bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/30";
       case "AGUARDANDO_APROVACAO":
-        return "text-purple-500";
+        return "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/30";
       case "DEVOLUCAO":
-        return "text-red-500";
+        return "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/30";
       default:
-        return "text-muted-foreground";
+        return "bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/30";
     }
+  };
+
+  const formatTime = (timestamp: any): string => {
+    if (!timestamp) return "--:--";
+    let date;
+    if (timestamp instanceof Timestamp) {
+      date = timestamp.toDate();
+    } else if (timestamp && typeof timestamp.seconds === "number") {
+      date = new Date(timestamp.seconds * 1000);
+    } else {
+      return "--:--";
+    }
+    if (isNaN(date.getTime())) return "--:--";
+    return format(date, "dd/MM HH:mm", { locale: ptBR });
   };
 
   const driverId = drivers
@@ -630,123 +649,198 @@ const CallDetailsModal = ({
     : call.solicitante.id.slice(-4).toUpperCase();
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <Card className="w-full max-w-lg relative bg-card max-h-[90vh] overflow-y-auto">
-        <button
-          onClick={onClose}
-          className="absolute top-3 right-3 p-1.5 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground"
-        >
-          <X size={20} />
-        </button>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-xl font-bold text-foreground">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in zoom-in-95 duration-200">
+      <Card className="w-full max-w-lg relative bg-card max-h-[90vh] overflow-y-auto shadow-2xl shadow-black/50 border border-orange-500/20 rounded-[2rem] flex flex-col">
+        {/* CABEÇALHO FIXO */}
+        <div className="sticky top-0 z-10 flex items-center justify-between p-5 bg-card/80 backdrop-blur-xl border-b border-border/50">
+          <h2 className="text-xl font-bold text-foreground">
             Detalhes do Chamado
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between bg-muted/20 p-3 rounded-xl border border-border/50">
+          </h2>
+          <button
+            onClick={onClose}
+            className="p-2 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-6">
+          {/* SOLICITANTE CARD */}
+          <div className="flex items-center justify-between bg-muted/20 p-4 rounded-2xl border border-border/50 shadow-sm">
             <div className="flex items-center gap-3">
               <AvatarComponent user={call.solicitante} />
-              <div>
-                <p className="font-semibold text-foreground flex items-center gap-2">
+              <div className="flex flex-col">
+                <span className="font-bold text-foreground text-sm">
                   {call.solicitante.name}
-                </p>
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <span>Solicitante</span>
-                  <div className="flex items-center gap-1 font-mono bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-xs text-primary border border-border/50">
-                    <UserCircle size={10} />
-                    {driverId}
-                  </div>
+                </span>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-[10px] text-muted-foreground uppercase font-bold">
+                    Solicitante
+                  </span>
+                  <span className="font-mono text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-md border border-primary/20">
+                    ID: {driverId}
+                  </span>
                 </div>
               </div>
             </div>
             <Button
               variant="outline"
               size="sm"
-              className="text-green-600 border-green-200 hover:bg-green-50 h-8 text-xs"
+              className="h-9 rounded-xl text-green-600 border-green-500/30 hover:bg-green-500/10 transition-colors font-bold shadow-sm"
               onClick={() => handleContactDriver(call.solicitante.phone)}
             >
-              <Phone size={14} className="mr-1.5" /> WhatsApp
+              <Phone size={14} className="mr-1.5" /> Contatar
             </Button>
           </div>
 
-          <div className="flex items-center justify-between">
-            <p
-              className={`font-bold text-sm uppercase ${getStatusColor(call.status)}`}
+          {/* STATUS E TEMPO */}
+          <div className="flex items-center justify-between px-1">
+            <span
+              className={cn(
+                "text-[11px] font-bold px-3 py-1 rounded-lg uppercase tracking-wider border shadow-sm",
+                getStatusBadgeStyle(call.status),
+              )}
             >
               {call.status.replace("_", " ")}
-            </p>
-            <div className="text-xs text-muted-foreground flex items-center gap-1">
-              <Clock size={12} />
-              {call.timestamp
-                ? format(
-                    call.timestamp instanceof Timestamp
-                      ? call.timestamp.toDate()
-                      : new Date((call.timestamp as any).seconds * 1000),
-                    "dd/MM HH:mm",
-                  )
-                : "--:--"}
+            </span>
+            <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground bg-muted/30 px-3 py-1 rounded-lg border border-border/50">
+              <Clock size={12} className="text-orange-500" />
+              {formatTime(call.timestamp)}
             </div>
           </div>
 
+          {/* PIN DE VALIDAÇÃO */}
           {call.securityCode && (
-            <div className="flex items-center justify-between p-3 bg-purple-50 dark:bg-purple-900/20 rounded-xl border border-purple-200 dark:border-purple-800">
-              <div className="flex items-center gap-2 text-purple-700 dark:text-purple-300">
+            <div className="flex items-center justify-between p-4 bg-purple-500/10 rounded-2xl border border-purple-500/20 shadow-inner">
+              <div className="flex items-center gap-2 text-purple-600 dark:text-purple-400">
                 <KeyRound size={18} />
-                <span className="text-xs font-bold uppercase">
+                <span className="text-xs font-bold uppercase tracking-wider">
                   PIN de Validação
                 </span>
               </div>
-              <span className="text-xl font-mono font-bold tracking-widest text-purple-700 dark:text-purple-300 bg-white/50 dark:bg-black/20 px-3 py-1 rounded shadow-sm">
+              <span className="text-2xl font-mono font-black tracking-[0.2em] text-purple-600 dark:text-purple-400 bg-white/60 dark:bg-black/20 px-4 py-1.5 rounded-xl shadow-sm border border-purple-500/20">
                 {call.securityCode}
               </span>
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <div className="flex items-center gap-2 p-2 rounded bg-muted/30">
-              <Package size={16} className="text-primary shrink-0" />
-              <span className="truncate">
-                {call.packageCount || "N/A"} Pacotes
+          {/* WIDGETS DE INFORMAÇÃO (GRID) */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2 flex items-center justify-between p-3 rounded-2xl bg-muted/20 border border-border/50">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <div className="p-2 bg-background rounded-xl shadow-sm border border-border/50">
+                  <Ticket size={16} className="text-primary" />
+                </div>
+                <span className="text-xs font-bold uppercase">Rota ID</span>
+              </div>
+              <span className="font-mono text-sm font-bold text-foreground">
+                {call.routeId || "N/A"}
               </span>
             </div>
-            <div className="flex items-center gap-2 p-2 rounded bg-muted/30">
-              <MapPin size={16} className="text-primary shrink-0" />
-              <span className="truncate">{call.hub || "Hub N/A"}</span>
+
+            <div className="flex items-center gap-3 p-3 rounded-2xl bg-muted/20 border border-border/50">
+              <div className="p-2 bg-background rounded-xl shadow-sm border border-border/50">
+                <Package size={16} className="text-primary" />
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[10px] font-bold text-muted-foreground uppercase">
+                  Pacotes
+                </span>
+                <span className="text-sm font-bold text-foreground">
+                  {call.packageCount || "N/A"} un.
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 p-3 rounded-2xl bg-muted/20 border border-border/50 overflow-hidden">
+              <div className="p-2 bg-background rounded-xl shadow-sm border border-border/50 shrink-0">
+                <Building size={16} className="text-orange-500" />
+              </div>
+              <div className="flex flex-col min-w-0">
+                <span className="text-[10px] font-bold text-muted-foreground uppercase">
+                  Hub
+                </span>
+                <span
+                  className="text-sm font-bold text-foreground truncate"
+                  title={call.hub}
+                >
+                  {call.hub?.split("_")[2] || call.hub || "N/A"}
+                </span>
+              </div>
             </div>
           </div>
 
-          <div className="w-full">
+          {/* LINKS E ARQUIVOS */}
+          <div className="space-y-3">
             <a
               href={call.location}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center justify-between gap-2 text-blue-600 hover:text-blue-700 hover:underline transition-colors p-2.5 rounded-lg bg-blue-50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-900/20 text-xs sm:text-sm"
+              className="flex items-center justify-between p-3 rounded-2xl bg-blue-500/5 hover:bg-blue-500/10 border border-blue-500/20 text-blue-600 dark:text-blue-400 transition-colors group"
             >
-              <div className="flex items-center gap-2 truncate">
-                <MapIcon size={16} className="shrink-0" />
-                <span className="truncate">{call.location}</span>
+              <div className="flex items-center gap-3 truncate">
+                <div className="p-2 bg-blue-500/10 rounded-xl group-hover:scale-105 transition-transform">
+                  <MapIcon size={16} />
+                </div>
+                <span className="text-xs font-medium truncate">
+                  {call.location}
+                </span>
               </div>
-              <ExternalLink size={12} className="shrink-0 opacity-50" />
+              <ExternalLink
+                size={14}
+                className="shrink-0 ml-2 opacity-50 group-hover:opacity-100 transition-opacity"
+              />
             </a>
+
+            {(call as any).romaneioData && (
+              <div className="flex items-center justify-between p-3 rounded-2xl bg-blue-500/5 border border-blue-500/20">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-blue-500/10 rounded-xl text-blue-600 dark:text-blue-400">
+                    <BookOpen size={16} />
+                  </div>
+                  <span className="text-xs font-bold text-foreground">
+                    Romaneio Anexado
+                  </span>
+                </div>
+                <button
+                  onClick={() => {
+                    const blob = new Blob([(call as any).romaneioData], {
+                      type: "text/csv;charset=utf-8;",
+                    });
+                    const link = document.createElement("a");
+                    link.href = window.URL.createObjectURL(blob);
+                    link.download =
+                      (call as any).romaneioFileName || "romaneio_rota.csv";
+                    link.click();
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 transition-all shadow-md hover:shadow-lg"
+                >
+                  <Download size={14} /> Baixar
+                </button>
+              </div>
+            )}
           </div>
 
+          {/* DESCRIÇÃO E DETALHES INTERNOS */}
           <DescriptionParser description={call.description} />
-        </CardContent>
-        <CardFooter className="mt-2 pt-4 border-t border-border flex flex-wrap justify-end gap-2 bg-muted/10">
+        </div>
+
+        {/* RODAPÉ DE AÇÕES */}
+        <div className="mt-auto p-5 border-t border-border/50 bg-muted/10 flex flex-wrap justify-end gap-2 rounded-b-[2rem]">
           {call.status === "EM ANDAMENTO" && (
             <>
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => onUpdateStatus(call.id, { status: "ABERTO" })}
+                className="rounded-xl h-9 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                onClick={() => onRevertToAberto(call)}
               >
                 <ArrowLeft size={16} className="mr-1.5" /> Aberto
               </Button>
               <Button
                 variant="destructive"
                 size="sm"
-                className="bg-red-100 text-red-700 hover:bg-red-200 border-red-200"
+                className="rounded-xl h-9 bg-red-100 text-red-700 hover:bg-red-200 border-red-200 shadow-sm"
                 onClick={() => onUpdateStatus(call.id, { status: "DEVOLUCAO" })}
               >
                 <AlertOctagon size={16} className="mr-1.5" /> Devolução
@@ -754,7 +848,7 @@ const CallDetailsModal = ({
               <Button
                 variant="default"
                 size="sm"
-                className="bg-purple-600 hover:bg-purple-700 text-white"
+                className="rounded-xl h-9 bg-purple-600 hover:bg-purple-700 text-white shadow-md"
                 onClick={() =>
                   onUpdateStatus(call.id, { status: "AGUARDANDO_APROVACAO" })
                 }
@@ -767,7 +861,7 @@ const CallDetailsModal = ({
             <Button
               variant="default"
               size="sm"
-              className="bg-blue-600 hover:bg-blue-700"
+              className="rounded-xl h-9 bg-blue-600 hover:bg-blue-700 shadow-md"
               onClick={() =>
                 onUpdateStatus(call.id, { status: "EM ANDAMENTO" })
               }
@@ -779,6 +873,7 @@ const CallDetailsModal = ({
             <Button
               variant="outline"
               size="sm"
+              className="rounded-xl h-9 shadow-sm"
               onClick={() =>
                 onUpdateStatus(call.id, { status: "EM ANDAMENTO" })
               }
@@ -790,15 +885,23 @@ const CallDetailsModal = ({
             <Button
               variant="default"
               size="sm"
-              className="bg-blue-600 hover:bg-blue-700"
-              onClick={() =>
-                onUpdateStatus(call.id, { status: "EM ANDAMENTO" })
-              }
+              className="rounded-xl h-9 bg-blue-600 hover:bg-blue-700 shadow-md"
+              onClick={() => {
+                if (!call.assignedTo) {
+                  showNotification(
+                    "error",
+                    "Erro",
+                    "Não é possível iniciar um chamado sem motorista.",
+                  );
+                  return;
+                }
+                onUpdateStatus(call.id, { status: "EM ANDAMENTO" });
+              }}
             >
               Em Andamento <ArrowRight size={16} className="ml-1.5" />
             </Button>
           )}
-        </CardFooter>
+        </div>
       </Card>
     </div>
   );
@@ -837,110 +940,114 @@ const CallCard = ({
 
   const requesterFull = drivers?.find((d) => d.uid === call.solicitante.id);
 
-  const urgencyColor =
+  // Cores baseadas na urgência
+  const urgencyColors =
     {
-      BAIXA: "border-l-blue-400",
-      MEDIA: "border-l-yellow-400",
-      ALTA: "border-l-orange-500",
-      URGENTE: "border-l-red-600",
-    }[call.urgency] || "border-l-gray-300";
+      BAIXA: "border-l-blue-400 bg-blue-400/5",
+      MEDIA: "border-l-yellow-400 bg-yellow-400/5",
+      ALTA: "border-l-orange-500 bg-orange-500/5",
+      URGENTE: "border-l-red-600 bg-red-600/5",
+    }[call.urgency] || "border-l-gray-300 bg-transparent";
 
   return (
     <div
       className={cn(
-        "bg-card p-3 rounded-md shadow-sm border border-border hover:shadow-md transition-all cursor-pointer group relative flex flex-col gap-2",
-        "border-l-4",
-        urgencyColor,
+        "bg-card p-4 rounded-xl shadow-sm border border-border hover:shadow-md hover:border-primary/30 transition-all cursor-pointer group relative flex flex-col gap-3",
+        "border-l-[6px]",
+        urgencyColors,
       )}
       onClick={() => onClick(call)}
     >
-      <div className="flex justify-between items-center pr-7">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <Ticket size={14} className="text-muted-foreground flex-shrink-0" />
-          <span className="text-xs font-bold font-mono text-primary truncate">
-            {call.routeId || "SEM ID"}
-          </span>
+      {/* CABEÇALHO DO CARD */}
+      <div className="flex justify-between items-start">
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-bold font-mono text-primary bg-primary/10 px-2 py-0.5 rounded-md border border-primary/20">
+              {call.routeId || "SEM ID"}
+            </span>
+            {call.isBulky && (
+              <span
+                className="bg-red-500/10 text-red-500 px-1.5 py-0.5 rounded-md border border-red-500/20"
+                title="Carga Volumosa"
+              >
+                <Weight size={12} />
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-bold text-foreground truncate max-w-[120px]">
+              {call.solicitante.name}
+            </span>
+            {requesterFull && (requesterFull as any)?.ratingAverage && (
+              <div className="flex items-center gap-0.5 text-[9px] font-bold text-yellow-500 bg-yellow-500/10 px-1.5 py-0.5 rounded border border-yellow-500/20">
+                <Star size={9} fill="currentColor" />
+                {((requesterFull as any)?.ratingAverage).toFixed(1)}
+              </div>
+            )}
+          </div>
         </div>
-        <div className="flex items-center gap-1 text-xs text-muted-foreground flex-shrink-0">
-          <Clock size={12} />
-          <span>{timeString}</span>
+
+        <div className="flex flex-col items-end gap-1">
+          <div className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground bg-muted/50 px-1.5 py-0.5 rounded border border-border/50">
+            <Clock size={10} />
+            {timeString}
+          </div>
+          <span className="text-[9px] font-mono text-muted-foreground">
+            ID: {driverId}
+          </span>
         </div>
       </div>
 
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 overflow-hidden">
-          <div className="w-1.5 h-1.5 rounded-full bg-primary/50 shrink-0"></div>
-
-          <span className="text-sm font-semibold text-foreground truncate leading-none">
-            {call.solicitante.name}
-          </span>
-
-          {requesterFull && (requesterFull as any)?.ratingAverage && (
-            <div className="flex items-center gap-0.5 text-[10px] font-bold text-yellow-500 bg-yellow-500/10 px-1.5 py-0.5 rounded border border-yellow-500/20 shrink-0">
-              <Star size={10} fill="currentColor" />
-              {((requesterFull as any)?.ratingAverage).toFixed(1)}
-            </div>
-          )}
-        </div>
-
-        <span className="text-[10px] font-mono text-muted-foreground bg-muted px-1 rounded shrink-0 border border-border/50">
-          {driverId}
-        </span>
-      </div>
-
+      {/* MOTIVO (SE HOUVER) */}
       {call.reason && (
-        <div className="mt-1">
-          <Badge
-            variant="outline"
-            className="text-[10px] py-0 h-5 border-red-200 text-red-700 bg-red-50 dark:bg-red-900/20 dark:text-red-300 dark:border-red-900/50 truncate max-w-full"
-          >
-            {call.reason}
-          </Badge>
-        </div>
+        <Badge
+          variant="outline"
+          className="text-[9px] py-0 h-4 border-red-500/30 text-red-500 bg-red-500/10 truncate max-w-fit font-semibold"
+        >
+          {call.reason}
+        </Badge>
       )}
 
-      <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1">
-        <div className="flex items-center gap-1" title="Pacotes">
-          <Package size={12} />
-          <span>{call.packageCount || "?"}</span>
+      {/* INFORMAÇÕES RÁPIDAS (ÍCONES) */}
+      <div className="flex items-center gap-3 text-xs text-muted-foreground">
+        <div
+          className="flex items-center gap-1.5 bg-muted/30 px-2 py-1 rounded-md"
+          title="Pacotes"
+        >
+          <Package size={12} className="text-primary" />
+          <span className="font-semibold text-foreground">
+            {call.packageCount || "?"}
+          </span>
         </div>
-        <div className="flex items-center gap-1 capitalize" title="Veículo">
-          <Truck size={12} />
-          <span className="truncate max-w-[60px]">
+        <div
+          className="flex items-center gap-1.5 bg-muted/30 px-2 py-1 rounded-md capitalize"
+          title="Veículo"
+        >
+          <Truck size={12} className="text-primary" />
+          <span className="truncate max-w-[70px] text-foreground font-medium">
             {call.vehicleType?.split(" ")[0] || "?"}
           </span>
         </div>
-        {call.isBulky && (
-          <div
-            className="flex items-center gap-1 text-orange-600"
-            title="Volumoso"
-          >
-            <Weight size={12} />
-          </div>
-        )}
       </div>
 
-      <div className="flex items-center justify-between mt-2 pt-2 border-t border-border/50">
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground truncate max-w-[50%]">
-          <Building size={12} className="shrink-0" />
-          <span className="truncate" title={call.hub}>
-            {call.hub || "Hub..."}
+      {/* RODAPÉ DO CARD (HUB E AÇÕES) */}
+      <div className="flex items-center justify-between mt-1 pt-3 border-t border-border/40">
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground truncate max-w-[60%]">
+          <Building size={12} className="shrink-0 text-orange-400" />
+          <span className="truncate font-medium" title={call.hub}>
+            {call.hub?.split("_")[2] || call.hub || "Hub N/A"}
           </span>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex gap-1.5">
           <button
             onClick={(e) => {
               e.stopPropagation();
               if (call.location) window.open(call.location, "_blank");
               else
-                showNotification(
-                  "error",
-                  "Erro",
-                  "Localização não disponível para este chamado.",
-                );
+                showNotification("error", "Erro", "Localização indisponível.");
             }}
-            className="p-1.5 rounded hover:bg-blue-100 text-blue-600 transition-colors"
+            className="p-1.5 rounded-md bg-blue-500/10 hover:bg-blue-500/20 text-blue-500 border border-blue-500/20 transition-all"
             title="Abrir no Maps"
           >
             <MapPin size={14} />
@@ -950,7 +1057,7 @@ const CallCard = ({
               e.stopPropagation();
               handleContactDriver(call.solicitante.phone);
             }}
-            className="p-1.5 rounded hover:bg-green-100 text-green-600 transition-colors"
+            className="p-1.5 rounded-md bg-green-500/10 hover:bg-green-500/20 text-green-500 border border-green-500/20 transition-all"
             title="Chamar no WhatsApp"
           >
             <Phone size={14} />
@@ -963,15 +1070,14 @@ const CallCard = ({
           e.stopPropagation();
           onDelete(call);
         }}
-        className="absolute top-2 right-2 p-1 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+        className="absolute top-2 right-2 p-1.5 bg-background/80 backdrop-blur-md rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-all border border-border"
         title="Excluir"
       >
-        <Trash2 size={14} />
+        <Trash2 size={12} />
       </button>
     </div>
   );
 };
-
 // Componente ApprovalCard movido para ser utilizado internamente
 const ApprovalCardComponent = ({
   call,
@@ -1680,7 +1786,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     });
   }, [calls, isMuted]);
 
-  // ✅ LOGICA CORRIGIDA: Somente altera para status intermediário
   const handleApprove = async (call: SupportCall) => {
     try {
       const updates = {
@@ -1699,7 +1804,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  // ✅ CONCLUSÃO MANUAL TOTAL (Botão Verde)
   const handleFinishManual = async (call: SupportCall) => {
     try {
       const updates = {
@@ -1734,6 +1838,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       );
     } catch (error) {
       showNotification("error", "Erro", "Falha ao rejeitar.");
+    }
+  };
+
+  // ✅ NOVA FUNÇÃO: Retornar para Aberto limpando o prestador
+  const handleRevertToAberto = async (call: SupportCall) => {
+    try {
+      const updates = {
+        status: "ABERTO",
+        assignedTo: null,
+        prestador: null,
+      };
+      await updateCall(call.id, updates as any);
+
+      if (call.assignedTo) {
+        await updateDriverStatus(call.assignedTo, { status: "DISPONIVEL" });
+      }
+
+      showNotification(
+        "success",
+        "Retornado para Aberto",
+        "O chamado voltou para a fila e o motorista foi liberado.",
+      );
+    } catch (error) {
+      showNotification("error", "Erro", "Falha ao retornar para Aberto.");
     }
   };
 
@@ -1781,21 +1909,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   const handleRestore = (callId: string) => {
-    updateCall(callId, { status: "ABERTO", deletedAt: deleteField() });
+    updateCall(callId, {
+      status: "ABERTO",
+      deletedAt: null,
+      assignedTo: null,
+      prestador: null,
+    } as any);
     showNotification("success", "Restaurado", "Chamado voltou para Abertos.");
   };
 
-  // ✅ FILTRAGEM GLOBAL BLINDADA (Isolamento de Cidade/Franquia)
   const filteredCallsMemo = useMemo(() => {
     const selectedHub = adminProfile.hub;
-    // Se não tem hub no perfil ou escolheu "Todos", libera acesso global
     if (!selectedHub || selectedHub.toLowerCase().includes("todos")) {
       return calls;
     }
 
     return calls.filter((c) => {
       if (!c.hub) return false;
-      // Extrai a cidade limpa pelo índice 2 (Ex: "LM Hub_PR_Londrina_Sul" -> "Londrina")
       const callCity =
         c.hub.split("_")[2]?.trim().toLowerCase() || c.hub.toLowerCase();
       const adminCity =
@@ -1826,7 +1956,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     [activeCalls],
   );
 
-  // ✅ ATUALIZADO: Filtra AGUARDANDO_APROVACAO e APROVADO_PELO_ADMIN
   const pendingApprovalCalls = useMemo(
     () =>
       activeCalls.filter(
@@ -3196,6 +3325,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           onClose={() => setSelectedCall(null)}
           onUpdateStatus={(id, updates) => {
             updateCall(id, updates);
+            setSelectedCall(null);
+          }}
+          onRevertToAberto={(call) => {
+            handleRevertToAberto(call);
             setSelectedCall(null);
           }}
           drivers={drivers}

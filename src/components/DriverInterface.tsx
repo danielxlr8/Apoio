@@ -56,6 +56,7 @@ import {
   Star,
   Mic,
   Smartphone,
+  Copy, // Ícone de Copiar adicionado
 } from "lucide-react";
 import { auth, db, storage } from "../firebase";
 import {
@@ -311,6 +312,128 @@ const RatingBlock = ({
   );
 };
 
+const DriverRatingBadge = ({
+  driverData,
+  isDark,
+}: {
+  driverData: any;
+  isDark: boolean;
+}) => {
+  const avg = driverData?.ratingAverage || 5.0;
+  const count = driverData?.ratingCount || 0;
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          onClick={(e) => e.stopPropagation()}
+          className="flex items-center gap-1 text-[10px] font-bold text-yellow-500 bg-yellow-500/10 px-2 py-0.5 rounded-full border border-yellow-500/30 hover:bg-yellow-500/20 transition-all cursor-pointer shadow-sm hover:shadow-md"
+        >
+          <Star size={10} fill="currentColor" />
+          {avg.toFixed(1)}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        onClick={(e) => e.stopPropagation()}
+        className={cn(
+          "w-64 p-5 rounded-[1.5rem] shadow-2xl z-[100] border",
+          isDark
+            ? "bg-slate-800/95 backdrop-blur-xl border-slate-600/50 shadow-black/50"
+            : "bg-white/95 backdrop-blur-xl border-orange-200/50 shadow-black/10",
+        )}
+        side="top"
+        align="center"
+      >
+        <div className="flex items-center gap-2 mb-4">
+          <div className="p-1.5 bg-yellow-500/10 rounded-lg">
+            <Star size={16} className="text-yellow-500" fill="currentColor" />
+          </div>
+          <h4
+            className={cn(
+              "text-sm font-bold uppercase tracking-wide",
+              isDark ? "text-slate-200" : "text-slate-700",
+            )}
+          >
+            Avaliações
+          </h4>
+        </div>
+
+        <div className="space-y-4">
+          {/* Média Geral em Destaque */}
+          <div className="flex items-center justify-between p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/20 shadow-inner">
+            <span
+              className={cn(
+                "text-xs font-black uppercase tracking-wider",
+                isDark ? "text-yellow-400" : "text-yellow-700",
+              )}
+            >
+              Média Geral
+            </span>
+            <div className="flex items-center gap-2">
+              <span
+                className={cn(
+                  "text-lg font-black font-mono",
+                  isDark ? "text-yellow-300" : "text-yellow-600",
+                )}
+              >
+                {avg.toFixed(1)}
+              </span>
+            </div>
+          </div>
+
+          {/* Categorias Individuais */}
+          <div className="space-y-2.5 px-1">
+            {[
+              { label: "Atendimento", key: "ratingAtendimentoAvg" },
+              { label: "Agilidade", key: "ratingAgilidadeAvg" },
+              { label: "Educação", key: "ratingEducacaoAvg" },
+            ].map(({ label, key }) => {
+              const val = driverData?.[key] || avg;
+              return (
+                <div key={key} className="flex items-center justify-between">
+                  <span
+                    className={cn(
+                      "text-[11px] font-semibold",
+                      isDark ? "text-slate-300" : "text-slate-600",
+                    )}
+                  >
+                    {label}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <StarRating rating={Math.round(val)} readOnly />
+                    <span
+                      className={cn(
+                        "text-[10px] font-mono font-bold bg-muted/50 px-1.5 py-0.5 rounded",
+                        isDark ? "text-yellow-400" : "text-yellow-700",
+                      )}
+                    >
+                      {val.toFixed(1)}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Rodapé com Total de Avaliações */}
+          <div className="pt-3 border-t border-border/50 text-center">
+            <p
+              className={cn(
+                "text-[10px] font-medium",
+                isDark ? "text-slate-400" : "text-slate-500",
+              )}
+            >
+              Baseado em{" "}
+              <span className="font-bold text-foreground">{count}</span>{" "}
+              avaliações
+            </p>
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+};
+
 const DriverCallHistoryCard = ({
   call,
   userId,
@@ -342,9 +465,12 @@ const DriverCallHistoryCard = ({
     if (!otherParty?.phone)
       return showNotification("error", "Erro", "Telefone indisponível.");
     const msg = encodeURIComponent(
-      `Olá, sou ${driver.name} referente ao apoio logístico.`,
+      isRequester
+        ? `Olá ${otherParty.name.split(" ")[0]}, sou ${driver.name}, você aceitou meu chamado de apoio logístico na rota ${call.routeId || ""}.`
+        : `Olá ${otherParty.name.split(" ")[0]}, sou ${driver.name}, e estarei prestando o apoio logístico que você solicitou na rota ${call.routeId || ""}.`,
     );
-    window.open(`https://wa.me/55${otherParty.phone}?text=${msg}`, "_blank");
+    const cleanPhone = otherParty.phone.replace(/\D/g, "");
+    window.open(`https://wa.me/55${cleanPhone}?text=${msg}`, "_blank");
   };
 
   const handleVerifyAndFinish = () => {
@@ -460,6 +586,8 @@ const DriverCallHistoryCard = ({
             {call.packageCount || 0} un.
           </span>
         </div>
+
+        {/* BLOCO DO SOLICITANTE MELHORADO COM BOTÃO COPIAR */}
         <div className="col-span-2">
           <span
             className={cn(
@@ -469,35 +597,57 @@ const DriverCallHistoryCard = ({
           >
             Solicitante
           </span>
-          <div className="flex items-center gap-2 p-2 rounded-xl bg-blue-500/10 border border-blue-500/30">
-            <User size={14} className="text-blue-600 dark:text-blue-400" />
-            <div className="flex-1">
+          <div className="flex items-center gap-3 p-3 rounded-xl bg-blue-500/10 border border-blue-500/30">
+            <User
+              size={18}
+              className="text-blue-600 dark:text-blue-400 shrink-0"
+            />
+            <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
                 <p
                   className={cn(
-                    "text-xs font-semibold",
+                    "text-sm font-bold truncate",
                     isDark ? "text-white" : "text-slate-800",
                   )}
                 >
                   {solicitante.name}
                 </p>
-                {/* ESTRELA RENDERIZADA SEMPRE (COM FALLBACK PARA 5.0) */}
-                <div className="flex items-center gap-0.5 text-[10px] font-bold text-yellow-500 bg-yellow-500/10 px-1.5 py-0.5 rounded border border-yellow-500/20">
-                  <Star size={10} fill="currentColor" />
-                  {((solicitanteFull as any)?.ratingAverage || 5.0).toFixed(1)}
-                </div>
+                <DriverRatingBadge
+                  driverData={solicitanteFull}
+                  isDark={isDark}
+                />
               </div>
-              <p
-                className={cn(
-                  "text-[10px]",
-                  isDark ? "text-white/60" : "text-slate-600",
-                )}
-              >
-                {formatPhoneNumber(solicitante.phone)}
-              </p>
+              <div className="flex items-center justify-between mt-1">
+                <div className="flex items-center gap-1.5 animate-pulse">
+                  <Phone
+                    size={12}
+                    className="text-blue-600 dark:text-blue-400"
+                  />
+                  <p className="text-xs font-bold tracking-wide text-blue-700 dark:text-blue-300">
+                    {formatPhoneNumber(solicitante.phone)}
+                  </p>
+                </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigator.clipboard.writeText(solicitante.phone);
+                    showNotification(
+                      "success",
+                      "Copiado!",
+                      "Número do solicitante copiado.",
+                    );
+                  }}
+                  className="p-1.5 bg-blue-500/20 hover:bg-blue-500/30 rounded-md transition-colors text-blue-700 dark:text-blue-300 flex items-center gap-1 shadow-sm"
+                  title="Copiar número"
+                >
+                  <Copy size={12} />
+                </button>
+              </div>
             </div>
           </div>
         </div>
+
+        {/* BLOCO DO PRESTADOR MELHORADO COM BOTÃO COPIAR */}
         {prestador && (
           <div className="col-span-2">
             <span
@@ -508,36 +658,57 @@ const DriverCallHistoryCard = ({
             >
               Prestador (Quem Aceitou)
             </span>
-            <div className="flex items-center gap-2 p-2 rounded-xl bg-green-500/10 border border-green-500/30">
-              <Truck size={14} className="text-green-600 dark:text-green-400" />
-              <div className="flex-1">
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-green-500/10 border border-green-500/30">
+              <Truck
+                size={18}
+                className="text-green-600 dark:text-green-400 shrink-0"
+              />
+              <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <p
                     className={cn(
-                      "text-xs font-semibold",
+                      "text-sm font-bold truncate",
                       isDark ? "text-white" : "text-slate-800",
                     )}
                   >
                     {prestador.name}
                   </p>
-                  {/* ESTRELA RENDERIZADA SEMPRE (COM FALLBACK PARA 5.0) */}
-                  <div className="flex items-center gap-0.5 text-[10px] font-bold text-yellow-500 bg-yellow-500/10 px-1.5 py-0.5 rounded border border-yellow-500/20">
-                    <Star size={10} fill="currentColor" />
-                    {((prestadorFull as any)?.ratingAverage || 5.0).toFixed(1)}
-                  </div>
+                  <DriverRatingBadge
+                    driverData={prestadorFull}
+                    isDark={isDark}
+                  />
                 </div>
-                <p
-                  className={cn(
-                    "text-[10px]",
-                    isDark ? "text-white/60" : "text-slate-600",
-                  )}
-                >
-                  {formatPhoneNumber(prestador.phone)}
-                </p>
+                <div className="flex items-center justify-between mt-1">
+                  <div className="flex items-center gap-1.5 animate-pulse">
+                    <Phone
+                      size={12}
+                      className="text-green-600 dark:text-green-400"
+                    />
+                    <p className="text-xs font-bold tracking-wide text-green-700 dark:text-green-300">
+                      {formatPhoneNumber(prestador.phone)}
+                    </p>
+                  </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigator.clipboard.writeText(prestador.phone);
+                      showNotification(
+                        "success",
+                        "Copiado!",
+                        "Número do prestador copiado.",
+                      );
+                    }}
+                    className="p-1.5 bg-green-500/20 hover:bg-green-500/30 rounded-md transition-colors text-green-700 dark:text-green-300 flex items-center gap-1 shadow-sm"
+                    title="Copiar número"
+                  >
+                    <Copy size={12} />
+                  </button>
+                </div>
               </div>
             </div>
           </div>
         )}
+
         <div className="col-span-2">
           <span
             className={cn(
@@ -569,6 +740,37 @@ const DriverCallHistoryCard = ({
             onRateDriver={onRateDriver}
           />
         )}
+
+        {call.romaneioData && (
+          <div className="col-span-2 p-2 rounded-xl bg-blue-500/10 dark:bg-blue-500/10 border border-blue-500/30">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <BookOpen
+                  size={14}
+                  className="text-blue-600 dark:text-blue-400"
+                />
+                <span className="text-xs font-semibold text-foreground dark:text-white">
+                  Romaneio Anexado
+                </span>
+              </div>
+              <button
+                onClick={() => {
+                  const blob = new Blob([call.romaneioData], {
+                    type: "text/csv;charset=utf-8;",
+                  });
+                  const link = document.createElement("a");
+                  link.href = window.URL.createObjectURL(blob);
+                  link.download = call.romaneioFileName || "romaneio_rota.csv";
+                  link.click();
+                }}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold text-white bg-blue-500 hover:bg-blue-600 transition-all shadow-md"
+              >
+                <Download size={12} /> <span>Acessar</span>
+              </button>
+            </div>
+          </div>
+        )}
+
         {call.cargoPhotoUrl && (
           <div className="col-span-2 p-2 rounded-xl bg-orange-500/10 dark:bg-orange-500/10 border border-orange-500/30">
             <div className="flex items-center justify-between">
@@ -595,7 +797,6 @@ const DriverCallHistoryCard = ({
         )}
       </div>
 
-      {/* 👇 NOVA LÓGICA DE BOTÕES INICIA AQUI */}
       {[
         "EM ANDAMENTO",
         "ABERTO",
@@ -610,14 +811,18 @@ const DriverCallHistoryCard = ({
               : "bg-orange-50/60 border-orange-200/50",
           )}
         >
-          {/* TOPO DO RODAPÉ: Botões de Contato e Cancelamento */}
           <div className="flex justify-between items-center w-full gap-2 flex-wrap">
             {otherParty && (
               <Button
                 variant="outline"
                 size="sm"
                 onClick={handleWhatsAppClick}
-                className="h-8 text-xs gap-1.5 border-green-400/30 text-green-500 hover:bg-green-500/20 rounded-xl"
+                className={cn(
+                  "h-8 text-xs gap-1.5 backdrop-blur-xl rounded-xl font-bold transition-all",
+                  isDark
+                    ? "bg-[#25D366]/10 text-[#25D366] border-[#25D366]/30 hover:bg-[#25D366]/20"
+                    : "bg-[#25D366]/10 text-[#128C7E] border-[#25D366]/20 hover:bg-[#25D366]/20",
+                )}
               >
                 <Phone size={14} /> Contatar
               </Button>
@@ -625,7 +830,7 @@ const DriverCallHistoryCard = ({
 
             {/* ✅ BOTÃO DE CANCELAR DINÂMICO PARA O PRESTADOR */}
             {!isRequester &&
-              ["EM ANDAMENTO", "AGUARDANDO_APROVACAO"].includes(
+              ["EM ANDAMENTO", "AGUARDANDO_APROVACAO", "ABERTO"].includes(
                 call.status,
               ) && (
                 <Button
@@ -647,7 +852,6 @@ const DriverCallHistoryCard = ({
                 </Button>
               )}
 
-            {/* ✅ CANCELAR PEDIDO PARA O SOLICITANTE */}
             {isRequester && call.status !== "CONCLUIDO" && (
               <Button
                 variant="ghost"
@@ -660,10 +864,8 @@ const DriverCallHistoryCard = ({
             )}
           </div>
 
-          {/* BASE DO RODAPÉ: MÁQUINA DE ESTADOS VISUAIS PARA AMBOS */}
           <div className="w-full mt-1">
             {isRequester ? (
-              /* ================= LÓGICA DO SOLICITANTE ================= */
               call.status === "AGUARDANDO_APROVACAO" ? (
                 <Button
                   size="sm"
@@ -692,9 +894,7 @@ const DriverCallHistoryCard = ({
                   </div>
                 </div>
               ) : null
-            ) : /* ================= LÓGICA DO PRESTADOR ================= */
-            showPinInput && call.status === "APROVADO_PELO_ADMIN" ? (
-              /* 🔑 CAMPO DE PIN PARA O PRESTADOR */
+            ) : showPinInput && call.status === "APROVADO_PELO_ADMIN" ? (
               <div className="flex flex-col gap-2 w-full animate-in fade-in slide-in-from-bottom-2 mt-2">
                 <p className="text-[10px] font-bold text-orange-500 text-center uppercase mb-2 tracking-wider leading-tight">
                   Solicite o número de pin ao solicitante ou ao admin para
@@ -761,7 +961,6 @@ const DriverCallHistoryCard = ({
           </div>
         </div>
       )}
-      {/* 👆 NOVA LÓGICA DE BOTÕES TERMINA AQUI */}
     </Card>
   );
 };
@@ -798,6 +997,10 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     null,
   );
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+
+  const [romaneioText, setRomaneioText] = useState<string | null>(null);
+  const [romaneioName, setRomaneioName] = useState<string>("");
+
   const [isListening, setIsListening] = useState(false);
 
   const [name, setName] = useState("");
@@ -817,7 +1020,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [currentDateTime, setCurrentDateTime] = useState<Date>(new Date());
 
-  // --- STATE DO LOTTIE ---
   const [bgAnimation, setBgAnimation] = useState<any>(null);
 
   const [installPrompt, setInstallPrompt] = useState<any>(null);
@@ -846,6 +1048,10 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
   const userId = auth.currentUser?.uid;
   const isInitialOpenCallsLoad = useRef(true);
 
+  const isGoogleUser = auth.currentUser?.providerData.some(
+    (provider) => provider.providerId === "google.com",
+  );
+
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
 
   const isProfileEditingLocked = useMemo(() => {
@@ -862,9 +1068,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
   const myIdsRef = useRef<string[]>([]);
   myIdsRef.current = myIds;
 
-  // ==========================================
-  // CONFIGURAÇÃO DO TOUR
-  // ==========================================
   const tourSteps: Step[] = [
     {
       target: "body",
@@ -1068,15 +1271,12 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     );
   }, [hubSearch]);
 
-  // ✅ ISOLAMENTO BLINDADO DE HISTÓRICO E CHAMADOS ATIVOS (POR CIDADE DO MOTORISTA)
   const filteredCalls = useMemo(() => {
     const active = allMyCalls.filter((c) => {
       if (c.status === "EXCLUIDO") return false;
 
-      // Se o motorista não tem hub definido no perfil, não quebra a tela
       if (!driver?.hub) return true;
 
-      // Extrai a cidade limpa do motorista e do chamado (Índice 2 do formato LM Hub_PR_Cidade_Sufixo)
       const driverCity =
         driver.hub.split("_")[2]?.trim().toLowerCase() ||
         driver.hub.toLowerCase();
@@ -1104,20 +1304,16 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     return active;
   }, [allMyCalls, historyFilter, myIds, driver?.hub]);
 
-  // ✅ ISOLAMENTO BLINDADO DE CHAMADOS ABERTOS (MAPA E LISTA "CHAMADOS NA REGIÃO")
   const filteredOpenCalls = useMemo(() => {
     return openSupportCalls.filter((c) => {
-      // 1. Esconde chamados criados pelo próprio motorista
       if (myIds.includes(c.solicitante?.id ?? "")) return false;
 
-      // 2. Filtro de pesquisa de rota no input
       if (
         routeIdSearch &&
         !c.routeId?.toLowerCase().includes(routeIdSearch.toLowerCase())
       )
         return false;
 
-      // 3. Isolamento por Cidade (Parsing inteligente)
       if (!driver?.hub) return true;
       const driverCity =
         driver.hub.split("_")[2]?.trim().toLowerCase() ||
@@ -1144,7 +1340,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       .slice(0, 10);
   }, [allDrivers]);
 
-  // --- EFEITO PARA CARREGAR O JSON DE ANIMAÇÃO ---
   useEffect(() => {
     if (activeTab === "ranking" && !bgAnimation) {
       fetch("/SynthRunner.json")
@@ -1248,29 +1443,24 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     }
   }, [driver, userId]);
 
-  // ==========================================
-  // CALLBACK DE NAVEGAÇÃO DO JOYRIDE (ATUALIZADO)
-  // ==========================================
   const handleJoyrideCallback = (data: CallBackProps) => {
     const { status, type, index, action } = data;
     const finishedStatuses: string[] = [STATUS.FINISHED, STATUS.SKIPPED];
 
     if (type === EVENTS.STEP_AFTER) {
-      // Avançar (Next)
       if (action === ACTIONS.NEXT) {
         const nextIndex = index + 1;
         if (nextIndex === 1) setActiveTab("availability");
         if (nextIndex === 2) setActiveTab("availability");
         if (nextIndex === 3) setActiveTab("support");
         if (nextIndex === 4) setActiveTab("activeCalls");
-        if (nextIndex === 5) setActiveTab("map"); // Abre a aba Mapa
-        if (nextIndex === 6) setActiveTab("ranking"); // Abre a aba Ranking
-        if (nextIndex === 7) setActiveTab("profile"); // Abre a aba Perfil
+        if (nextIndex === 5) setActiveTab("map");
+        if (nextIndex === 6) setActiveTab("ranking");
+        if (nextIndex === 7) setActiveTab("profile");
         setTimeout(() => {
           setTourStepIndex(nextIndex);
         }, 400);
       }
-      // Voltar (Prev)
       if (action === ACTIONS.PREV) {
         const prevIndex = index - 1;
         if (prevIndex === 1) setActiveTab("availability");
@@ -1390,13 +1580,23 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
 
   useEffect(() => {
     if (!userId) return;
-    const allDriversQuery = query(collection(db, "motoristas_pre_aprovados"));
-    const unsubscribeAllDrivers = onSnapshot(allDriversQuery, (snapshot) => {
-      const driversData = snapshot.docs.map(
-        (doc) => ({ ...doc.data(), uid: doc.id }) as Driver,
-      );
-      setAllDrivers(driversData);
-    });
+
+    // 🔥 BUSCA ÚNICA: Salva a cota do Firebase!
+    const fetchAllDrivers = async () => {
+      try {
+        const allDriversQuery = query(
+          collection(db, "motoristas_pre_aprovados"),
+        );
+        const snapshot = await getDocs(allDriversQuery);
+        const driversData = snapshot.docs.map(
+          (doc) => ({ ...doc.data(), uid: doc.id }) as Driver,
+        );
+        setAllDrivers(driversData);
+      } catch (error) {
+        console.error("Erro ao buscar motoristas:", error);
+      }
+    };
+    fetchAllDrivers();
 
     const start = startDate ? new Date(startDate) : new Date(0);
     start.setHours(0, 0, 0, 0);
@@ -1516,7 +1716,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     return () => {
       unsubscribeMyCalls();
       unsubscribeOpenCalls();
-      unsubscribeAllDrivers();
     };
   }, [userId, startDate, endDate]);
 
@@ -1603,7 +1802,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
           phone: driver.phone,
         },
       } as any);
-      // REGRA 3B: Marca motorista prestador como INDISPONIVEL ao aceitar chamado
       await updateDriver(shopeeId, { status: "INDISPONIVEL" });
       await updateDriver(shopeeId, { status: "EM_ROTA" });
     } catch {
@@ -1630,12 +1828,14 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     );
   };
 
+  // ✅ CORREÇÃO DEFINITIVA DO BUG DO VÍNCULO FANTASMA NO DRIVER
   const handleCancelSupport = async (id: string) => {
     if (!userId || !shopeeId) return;
     setLocalDriverStatus("DISPONIVEL");
     try {
       await updateCall(id, {
-        assignedTo: deleteField(),
+        assignedTo: null, // Força a anulação do ID
+        prestador: null, // Força a anulação do objeto do prestador
         status: "ABERTO",
       } as any);
       await updateDriver(shopeeId, { status: "DISPONIVEL" });
@@ -1838,6 +2038,33 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     }
   };
 
+  const handleRomaneioFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (!file.name.toLowerCase().endsWith(".csv")) {
+        setModalError(
+          "Formato inválido. Envie apenas o arquivo do romaneio em formato .CSV",
+        );
+        e.target.value = "";
+        setRomaneioText(null);
+        return;
+      }
+      if (file.size > 800 * 1024) {
+        setModalError("O arquivo do romaneio não pode ter mais que 800KB.");
+        e.target.value = "";
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setRomaneioText(event.target?.result as string);
+        setRomaneioName(file.name);
+        setModalError("");
+      };
+      reader.readAsText(file);
+    }
+  };
+
   const handleVoiceInput = (
     field: "reason" | "description",
     setter: React.Dispatch<React.SetStateAction<string>>,
@@ -1883,11 +2110,33 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     const pkg = Number(packageCount);
     const regions = deliveryRegions.filter(Boolean);
     const vehicles = neededVehicles.filter(Boolean);
+
     if (pkg < 20) {
       setModalError("Mínimo 20 pacotes.");
       setIsSubmitting(false);
       return;
     }
+
+    if (
+      !location.includes("google") &&
+      !location.includes("maps") &&
+      !location.includes("http")
+    ) {
+      setModalError(
+        "É obrigatório usar o botão de GPS (📍) ao lado para gerar a localização exata.",
+      );
+      setIsSubmitting(false);
+      return;
+    }
+
+    if (!romaneioText) {
+      setModalError(
+        "O anexo do Romaneio é obrigatório. Se não souber baixar, pergunte ao Chatbot (Shopito)!",
+      );
+      setIsSubmitting(false);
+      return;
+    }
+
     if (
       !location ||
       !hub ||
@@ -1896,11 +2145,13 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       regions.length === 0 ||
       vehicles.length === 0
     ) {
-      setModalError("Preencha todos os campos.");
+      setModalError("Preencha todos os campos obrigatórios.");
       setIsSubmitting(false);
       return;
     }
+
     let cargoPhotoUrl = null;
+
     if (cargoPhoto) {
       try {
         setIsUploadingPhoto(true);
@@ -1919,18 +2170,20 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
         setIsUploadingPhoto(false);
       }
     }
+
     const informalDesc = `MOTIVO: ${reason}. DETALHES: ${description}. Hub: ${hub}. Loc: ${location}. Qtd: ${pkg}. Regiões: ${regions.join(", ")}. Veículos: ${vehicles.join(", ")}. ${isBulky ? "VOLUMOSO" : ""}`;
     try {
       let urgency: UrgencyLevel = "BAIXA";
       if (pkg >= 100) urgency = "URGENTE";
       else if (pkg >= 90) urgency = "ALTA";
       else if (pkg >= 60) urgency = "MEDIA";
+
       const newCall = {
         routeId: `SPX-${Date.now().toString().slice(-6)}`,
         description: informalDesc,
         urgency,
         location,
-        collectionLocation: location, // [CORREÇÃO] Campo reintegrado para satisfazer a validação
+        collectionLocation: location,
         status: "ABERTO",
         securityCode: generateSecurityCode(),
         vehicleType: vehicles.join(", "),
@@ -1939,6 +2192,8 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
         packageCount: pkg,
         deliveryRegions: regions,
         cargoPhotoUrl,
+        romaneioData: romaneioText,
+        romaneioFileName: romaneioName,
         coordinates: coordinates
           ? new GeoPoint(coordinates.lat, coordinates.lng)
           : null,
@@ -1951,8 +2206,8 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
           phone: driver.phone,
         },
       };
+
       await addNewCall(newCall);
-      // REGRA 3A: Marca motorista como INDISPONIVEL ao enviar solicitação
       if (shopeeId) {
         await updateDriver(shopeeId, { status: "INDISPONIVEL" });
         setLocalDriverStatus("INDISPONIVEL");
@@ -1966,6 +2221,8 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       setPackageCount("");
       setCargoPhoto(null);
       setCargoPhotoPreview(null);
+      setRomaneioText(null);
+      setRomaneioName("");
       setCoordinates(null);
     } catch (err: any) {
       setModalError(err.message);
@@ -2363,7 +2620,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                 </div>
 
                 <div className="relative w-full h-80 rounded-3xl border border-orange-500/30 shadow-2xl overflow-hidden group transition-all hover:scale-[1.01]">
-                  {/* LOTTIE ANIMATION BACKGROUND */}
                   {bgAnimation && (
                     <div
                       className={cn(
@@ -2535,7 +2791,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     </button>
                   ))}
                 </div>
-                {/* CALENDARIOS */}
                 <div className="flex gap-2 mb-2 flex-wrap items-center">
                   <Popover>
                     <PopoverTrigger asChild>
@@ -2723,7 +2978,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                   </Alert>
                 )}
 
-                {/* Configurações */}
                 <section
                   className={cn(
                     "rounded-[1.5rem] p-5 border",
@@ -2801,7 +3055,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                   </div>
                 </section>
 
-                {/* Meus Dados */}
                 <section
                   className={cn(
                     "rounded-[1.5rem] p-5 space-y-4 border transition-all",
@@ -2867,7 +3120,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     </div>
                   </div>
 
-                  {/* CAMPO DE HUB */}
                   <div className="space-y-1">
                     <label
                       className={cn(
@@ -2933,7 +3185,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     </div>
                   </div>
 
-                  {/* CAMPO DE SEXO (NOVO) */}
                   <div className="space-y-1">
                     <label
                       className={cn(
@@ -3101,100 +3352,169 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                   </button>
                 </section>
 
-                {/* Segurança */}
-                <section
-                  className={cn(
-                    "rounded-[1.5rem] p-5 space-y-4 border transition-all",
-                    theme === "dark"
-                      ? "bg-slate-900/40 border-orange-500/30 backdrop-blur-sm"
-                      : "bg-white/80 border-orange-200/50",
-                    isProfileEditingLocked && "opacity-60 pointer-events-none",
-                  )}
-                  style={
-                    theme === "dark"
-                      ? {
-                          boxShadow:
-                            "0 25px 50px -12px rgba(254, 95, 47, 0.3), inset 0 1px 0 0 rgba(254, 95, 47, 0.1)",
-                        }
-                      : {
-                          boxShadow:
-                            "0 25px 50px -12px rgba(254, 95, 47, 0.15)",
-                        }
-                  }
-                >
-                  <h4
+                {!isGoogleUser ? (
+                  <section
                     className={cn(
-                      "text-xs font-bold uppercase mb-2 tracking-wide",
-                      theme === "dark" ? "text-orange-300" : "text-slate-600",
+                      "rounded-[1.5rem] p-5 space-y-4 border transition-all",
+                      theme === "dark"
+                        ? "bg-slate-900/40 border-orange-500/30 backdrop-blur-sm"
+                        : "bg-white/80 border-orange-200/50",
+                      isProfileEditingLocked &&
+                        "opacity-60 pointer-events-none",
                     )}
+                    style={
+                      theme === "dark"
+                        ? {
+                            boxShadow:
+                              "0 25px 50px -12px rgba(254, 95, 47, 0.3), inset 0 1px 0 0 rgba(254, 95, 47, 0.1)",
+                          }
+                        : {
+                            boxShadow:
+                              "0 25px 50px -12px rgba(254, 95, 47, 0.15)",
+                          }
+                    }
                   >
-                    Segurança
-                  </h4>
-                  <div className="space-y-3">
-                    <div className="relative">
+                    <h4
+                      className={cn(
+                        "text-xs font-bold uppercase mb-2 tracking-wide",
+                        theme === "dark" ? "text-orange-300" : "text-slate-600",
+                      )}
+                    >
+                      Segurança
+                    </h4>
+                    <div className="space-y-3">
+                      <div className="relative">
+                        <input
+                          type={showPassword ? "text" : "password"}
+                          value={newPassword}
+                          disabled={isProfileEditingLocked}
+                          onChange={(e) => setNewPassword(e.target.value)}
+                          placeholder="Nova Senha"
+                          className={cn(
+                            "w-full p-4 rounded-xl text-sm border pr-12 disabled:opacity-50",
+                            theme === "dark"
+                              ? "bg-slate-700 border-slate-600 text-white placeholder:text-white/50"
+                              : "bg-white border-slate-300 text-slate-900",
+                          )}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword(!showPassword)}
+                          className={cn(
+                            "absolute right-4 top-4 transition-colors",
+                            theme === "dark"
+                              ? "text-slate-400 hover:text-white"
+                              : "text-slate-500 hover:text-slate-700",
+                          )}
+                        >
+                          {showPassword ? (
+                            <EyeOff size={18} />
+                          ) : (
+                            <Eye size={18} />
+                          )}
+                        </button>
+                      </div>
                       <input
                         type={showPassword ? "text" : "password"}
-                        value={newPassword}
+                        value={confirmPassword}
                         disabled={isProfileEditingLocked}
-                        onChange={(e) => setNewPassword(e.target.value)}
-                        placeholder="Nova Senha"
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        placeholder="Confirmar Nova Senha"
                         className={cn(
-                          "w-full p-4 rounded-xl text-sm border pr-12 disabled:opacity-50",
+                          "w-full p-4 rounded-xl text-sm border disabled:opacity-50",
                           theme === "dark"
                             ? "bg-slate-700 border-slate-600 text-white placeholder:text-white/50"
                             : "bg-white border-slate-300 text-slate-900",
                         )}
                       />
                       <button
-                        type="button"
-                        onClick={() => setShowPassword(!showPassword)}
+                        onClick={handleChangePassword}
+                        disabled={
+                          !newPassword ||
+                          !confirmPassword ||
+                          isProfileEditingLocked
+                        }
                         className={cn(
-                          "absolute right-4 top-4 transition-colors",
+                          "w-full py-4 rounded-xl text-sm font-medium border transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
                           theme === "dark"
-                            ? "text-slate-400 hover:text-white"
-                            : "text-slate-500 hover:text-slate-700",
+                            ? "border-slate-600 text-white bg-slate-700 hover:bg-slate-600"
+                            : "border-slate-300 text-slate-700 bg-white hover:bg-slate-50",
                         )}
                       >
-                        {showPassword ? (
-                          <EyeOff size={18} />
-                        ) : (
-                          <Eye size={18} />
-                        )}
+                        Atualizar Senha
                       </button>
                     </div>
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      value={confirmPassword}
-                      disabled={isProfileEditingLocked}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      placeholder="Confirmar Nova Senha"
+                  </section>
+                ) : (
+                  <section
+                    className={cn(
+                      "rounded-[1.5rem] p-5 space-y-4 border transition-all",
+                      theme === "dark"
+                        ? "bg-slate-900/40 border-orange-500/30 backdrop-blur-sm"
+                        : "bg-white/80 border-orange-200/50",
+                    )}
+                  >
+                    <h4
                       className={cn(
-                        "w-full p-4 rounded-xl text-sm border disabled:opacity-50",
-                        theme === "dark"
-                          ? "bg-slate-700 border-slate-600 text-white placeholder:text-white/50"
-                          : "bg-white border-slate-300 text-slate-900",
-                      )}
-                    />
-                    <button
-                      onClick={handleChangePassword}
-                      disabled={
-                        !newPassword ||
-                        !confirmPassword ||
-                        isProfileEditingLocked
-                      }
-                      className={cn(
-                        "w-full py-4 rounded-xl text-sm font-medium border transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
-                        theme === "dark"
-                          ? "border-slate-600 text-white bg-slate-700 hover:bg-slate-600"
-                          : "border-slate-300 text-slate-700 bg-white hover:bg-slate-50",
+                        "text-xs font-bold uppercase tracking-wide",
+                        theme === "dark" ? "text-orange-300" : "text-slate-600",
                       )}
                     >
-                      Atualizar Senha
-                    </button>
-                  </div>
-                </section>
+                      Segurança
+                    </h4>
+                    <div
+                      className={cn(
+                        "flex items-start gap-4 p-4 rounded-xl border",
+                        theme === "dark"
+                          ? "bg-slate-800/80 border-slate-600/50"
+                          : "bg-slate-50 border-slate-200",
+                      )}
+                    >
+                      <div className="mt-1">
+                        <svg className="w-6 h-6" viewBox="0 0 48 48">
+                          <path
+                            fill="#FFC107"
+                            d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12c0-6.627,5.373-12,12-12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C12.955,4,4,12.955,4,24c0,11.045,8.955,20,20,20C44,22.659,43.862,21.35,43.611,20.083z"
+                          ></path>
+                          <path
+                            fill="#FF3D00"
+                            d="M6.306,14.691l6.571,4.819C14.655,15.108,18.961,12,24,12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C16.318,4,9.656,8.337,6.306,14.691z"
+                          ></path>
+                          <path
+                            fill="#4CAF50"
+                            d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.222,0-9.519-3.487-11.187-8.264l-6.522,5.025C9.505,39.556,16.227,44,24,44z"
+                          ></path>
+                          <path
+                            fill="#1976D2"
+                            d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.574l6.19,5.238C42.022,35.244,44,30.036,44,24C44,22.659,43.862,21.35,43.611,20.083z"
+                          ></path>
+                        </svg>
+                      </div>
+                      <div>
+                        <p
+                          className={cn(
+                            "text-sm font-bold",
+                            theme === "dark" ? "text-white" : "text-slate-800",
+                          )}
+                        >
+                          Conta vinculada ao Google
+                        </p>
+                        <p
+                          className={cn(
+                            "text-xs mt-1",
+                            theme === "dark"
+                              ? "text-slate-400"
+                              : "text-slate-500",
+                          )}
+                        >
+                          Sua autenticação é protegida pelo Google. Não é
+                          necessário o uso de senhas dentro do aplicativo.
+                        </p>
+                      </div>
+                    </div>
+                  </section>
+                )}
 
-                {/* Avaliações Recebidas */}
                 {(driver as any).ratingCount > 0 && (
                   <section
                     className={cn(
@@ -3307,7 +3627,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
               </div>
             )}
           </div>
-          {/* ... MODAIS ... */}
+
           {isSupportModalOpen && (
             <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4">
               <div
@@ -3351,23 +3671,91 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                       </select>
                     </div>
 
-                    <div>
+                    <div className="relative">
                       <label className="text-xs font-bold text-white/70 uppercase mb-1 flex items-center justify-between">
                         Localização
-                        <button
-                          type="button"
-                          onClick={handleGetLocation}
-                          className="text-primary hover:text-primary/80 transition-colors flex items-center justify-center p-1 rounded-lg hover:bg-white/5"
-                          title="Usar localização atual"
-                        >
-                          <MapPin size={20} />
-                        </button>
+                        <div className="relative flex items-center">
+                          {!location && !isLocating && (
+                            <div className="absolute right-8 mr-2 flex items-center animate-pulse pointer-events-none">
+                              <span className="bg-primary text-white text-[10px] font-bold px-2 py-1 rounded-lg shadow-lg whitespace-nowrap">
+                                Clique no GPS
+                              </span>
+                              <div className="w-2 h-2 bg-primary transform rotate-45 -ml-1"></div>
+                            </div>
+                          )}
+                          <button
+                            type="button"
+                            onClick={handleGetLocation}
+                            disabled={isLocating}
+                            className={cn(
+                              "text-primary transition-all flex items-center justify-center p-1.5 rounded-lg",
+                              !location && !isLocating
+                                ? "bg-primary/20 animate-bounce ring-2 ring-primary/50"
+                                : "hover:bg-white/5",
+                              isLocating && "opacity-50 cursor-wait",
+                            )}
+                            title="Usar localização atual"
+                          >
+                            {isLocating ? (
+                              <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                            ) : (
+                              <MapPin size={20} />
+                            )}
+                          </button>
+                        </div>
                       </label>
                       <input
                         value={location}
+                        readOnly
                         onChange={(e) => setLocation(e.target.value)}
-                        className="w-full p-3 bg-slate-700/90 backdrop-blur-xl border border-slate-600/50 rounded-xl text-sm text-white placeholder:text-white/50 focus:ring-2 focus:ring-primary outline-none shadow-lg shadow-black/10"
-                        placeholder="Digite o endereço ou use o botão de GPS"
+                        className={cn(
+                          "w-full p-3 bg-slate-700/90 backdrop-blur-xl border border-slate-600/50 rounded-xl text-sm text-white outline-none shadow-lg shadow-black/10 cursor-not-allowed transition-all",
+                          isLocating
+                            ? "border-primary/50 bg-primary/10 animate-pulse text-primary placeholder:text-primary"
+                            : "placeholder:text-white/50 focus:ring-2 focus:ring-primary",
+                        )}
+                        placeholder={
+                          isLocating
+                            ? "Buscando localização exata... ⏳"
+                            : "Obrigatório usar o botão de GPS 📍"
+                        }
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-bold text-white/70 uppercase mb-1 flex items-center gap-2">
+                        <span className="flex items-center gap-1">
+                          Romaneio da Rota{" "}
+                          <span className="text-red-500">*</span>
+                        </span>
+                        <TooltipProvider delayDuration={100}>
+                          <Tooltip>
+                            <TooltipTrigger
+                              type="button"
+                              className="text-orange-400 hover:text-orange-300 flex items-center"
+                            >
+                              <HelpCircle size={16} />
+                            </TooltipTrigger>
+                            <TooltipContent
+                              side="top"
+                              align="center"
+                              className="w-[260px] sm:max-w-xs bg-slate-800 text-white border border-orange-500/50 p-3 rounded-xl z-[99999] shadow-2xl whitespace-normal break-words"
+                            >
+                              <p className="text-xs text-center leading-relaxed">
+                                Anexe o arquivo CSV do romaneio. Não sabe como
+                                baixar? <b>Pergunte ao Chatbot (Shopito)</b> no
+                                canto da tela!
+                              </p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      </label>
+                      <input
+                        type="file"
+                        onChange={handleRomaneioFileChange}
+                        accept=".csv"
+                        className="w-full p-2 bg-slate-700/90 backdrop-blur-xl border border-slate-600/50 rounded-xl text-sm text-white file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-bold file:bg-orange-500 file:text-white hover:file:bg-orange-600 outline-none shadow-lg shadow-black/10 cursor-pointer"
                         required
                       />
                     </div>
@@ -3571,6 +3959,50 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                     )}
                   </Button>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {isReauthModalOpen && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6 bg-slate-900/90 backdrop-blur-sm animate-in fade-in">
+              <div className="bg-slate-800/95 backdrop-blur-2xl rounded-3xl p-6 md:p-8 text-center max-w-sm w-full shadow-2xl shadow-black/40 border border-orange-500/30">
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-xl font-bold text-white">
+                    Confirmar Senha
+                  </h2>
+                  <button
+                    onClick={() => setIsReauthModalOpen(false)}
+                    className="text-white/50 hover:text-white"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+                <p className="text-sm text-white/70 mb-4 text-left">
+                  Digite sua senha atual para autorizar a troca de segurança.
+                </p>
+                <input
+                  type="password"
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  placeholder="Sua senha atual"
+                  className="w-full p-4 rounded-xl text-sm bg-slate-700/90 text-white mb-2 focus:ring-2 focus:ring-orange-500/50 outline-none"
+                />
+                {reauthError && (
+                  <p className="text-red-400 text-xs mb-4 font-bold">
+                    {reauthError}
+                  </p>
+                )}
+                <Button
+                  onClick={handleReauthenticateAndChange}
+                  disabled={isReauthenticating || !currentPassword}
+                  className="w-full mt-4 h-12"
+                >
+                  {isReauthenticating ? (
+                    <Loading size="sm" variant="spinner" />
+                  ) : (
+                    "Confirmar e Alterar"
+                  )}
+                </Button>
               </div>
             </div>
           )}

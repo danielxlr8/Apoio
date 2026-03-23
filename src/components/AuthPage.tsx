@@ -39,6 +39,7 @@ import {
   AlertTriangle,
   KeyRound,
   X,
+  CheckCircle,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { Loading } from "./ui/loading";
@@ -125,8 +126,6 @@ export const AuthPage = () => {
 
     return () => clearInterval(interval);
   }, []);
-
-  // Loading inicial removido - card aparece imediatamente
 
   // Buscar dados do admin quando a aba admin estiver selecionada
   useEffect(() => {
@@ -336,6 +335,7 @@ export const AuthPage = () => {
     return digits;
   };
 
+  // 🔥 LOGIN REVISADO: Evita Tela Laranja (Bloqueia motoristas sem ID validado)
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -357,11 +357,28 @@ export const AuthPage = () => {
         email,
         password,
       );
-      if (activeTab === "admin" && !userCredential.user.emailVerified) {
-        setError("Verifique seu e-mail.");
-        await signOut(auth);
-        setLoading(false);
-        return;
+
+      const user = userCredential.user;
+
+      if (activeTab === "admin") {
+        if (!user.emailVerified) {
+          setError("Verifique seu e-mail.");
+          await signOut(auth);
+          setLoading(false);
+          return;
+        }
+      } else {
+        // SEGURANÇA CONTRA TELA LARANJA: Verifica se o motorista existe na DB
+        const driversRef = collection(db, "motoristas_pre_aprovados");
+        const q = query(driversRef, where("uid", "==", user.uid));
+        const querySnapshot = await getDocs(q);
+
+        if (querySnapshot.empty) {
+          setError("Sua conta ainda não foi autorizada pelo Admin.");
+          await signOut(auth); // Desloga imediatamente para não dar crash no App.tsx
+          setLoading(false);
+          return;
+        }
       }
     } catch (err: any) {
       if (
@@ -425,11 +442,13 @@ export const AuthPage = () => {
     }
   };
 
+  // 🔥 CADASTRO REVISADO: Impede travamento e avisa sucesso/erro
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError("");
     setSuccessMessage("");
+
     if (activeTab === "driver" && email.endsWith("@shopee.com")) {
       setError("Contas @shopee.com devem ser Admin.");
       setLoading(false);
@@ -440,22 +459,43 @@ export const AuthPage = () => {
       setLoading(false);
       return;
     }
+
     try {
+      // Verifica ANTES de criar no Auth se o ID do motorista é válido
+      let driverDocRef: any = null;
+      let driverDoc: any = null;
+
+      if (activeTab === "driver") {
+        if (!driverId.trim()) {
+          setError("ID do Motorista é obrigatório.");
+          setLoading(false);
+          return;
+        }
+        driverDocRef = doc(db, "motoristas_pre_aprovados", driverId.trim());
+        driverDoc = await getDoc(driverDocRef);
+
+        if (!driverDoc.exists()) {
+          setError("ID inválido. Solicite um ID ao Administrador.");
+          setLoading(false);
+          return;
+        }
+        if (driverDoc.data().uid) {
+          setError("Este ID de motorista já está em uso.");
+          setLoading(false);
+          return;
+        }
+      }
+
+      // Se passou nas verificações, cria no Firebase Auth
       const userCredential = await createUserWithEmailAndPassword(
         auth,
         email,
         password,
       );
       const user = userCredential.user;
+
       if (activeTab === "driver") {
-        const driverDocRef = doc(db, "motoristas_pre_aprovados", driverId);
-        const driverDoc = await getDoc(driverDocRef);
-        if (!driverDoc.exists() || driverDoc.data().uid) {
-          setError("ID inválido ou já cadastrado.");
-          await user.delete();
-          setLoading(false);
-          return;
-        }
+        // Atualiza o documento pré-aprovado com os dados do usuário
         await updateDoc(driverDocRef, {
           name: `${name} ${lastName}`,
           phone: phone.replace(/\D/g, ""),
@@ -463,6 +503,16 @@ export const AuthPage = () => {
           email: user.email,
           uid: user.uid,
         });
+
+        // Desloga para forçar a re-entrada segura e avisa o sucesso
+        await signOut(auth);
+        setSuccessMessage("Conta criada com sucesso! Faça o Login.");
+        setTimeout(() => {
+          setIsLoginView(true);
+          setSuccessMessage("");
+          setEmail("");
+          setPassword("");
+        }, 2500);
       } else {
         await sendEmailVerification(user);
         const adminDocRef = doc(db, "admins_pre_aprovados", user.uid);
@@ -476,15 +526,15 @@ export const AuthPage = () => {
         });
         await signOut(auth);
         setSuccessMessage("Conta criada! Verifique seu e-mail.");
-        setIsLoginView(true);
+        setTimeout(() => setIsLoginView(true), 2500);
       }
     } catch (err: any) {
       if (err.code === "auth/email-already-in-use") {
-        setError("E-mail já em uso.");
+        setError("Este E-mail já está cadastrado.");
       } else if (err.code === "auth/weak-password") {
         setError("Senha fraca (mínimo 6 caracteres).");
       } else {
-        setError("Falha ao criar conta.");
+        setError("Falha ao criar conta. Tente novamente.");
         console.error(err);
       }
     } finally {
@@ -516,14 +566,20 @@ export const AuthPage = () => {
           setLoading(false);
           return;
         }
+
+        // Verifica se a conta google já está atrelada a um motorista aprovado
         const q = query(
           collection(db, "motoristas_pre_aprovados"),
           where("googleUid", "==", user.uid),
         );
         const querySnapshot = await getDocs(q);
+
         if (querySnapshot.empty) {
+          // Motorista não existe no sistema ainda. Inicia processo de vínculo.
           setGoogleUser(user);
           setIsLinkingGoogleAccount(true);
+          // IMPORTANTE: Se ele não foi aprovado, não o deixe "logado" na sessão.
+          await signOut(auth);
         }
       }
     } catch (err: any) {
@@ -551,25 +607,33 @@ export const AuthPage = () => {
       const driverDocRef = doc(db, "motoristas_pre_aprovados", driverId.trim());
       const driverDoc = await getDoc(driverDocRef);
       if (!driverDoc.exists()) {
-        setLinkingError("ID não encontrado.");
+        setLinkingError("ID não encontrado. Peça autorização ao Admin.");
         setLoading(false);
         return;
       }
       const driverData = driverDoc.data();
       if (driverData.uid || driverData.googleUid) {
-        setLinkingError("ID já vinculado.");
+        setLinkingError("ID já vinculado a outra conta.");
         setLoading(false);
         return;
       }
+
       await updateDoc(driverDoc.ref, {
         googleUid: googleUser.uid,
         email: googleUser.email,
         name: driverData.name || googleUser.displayName || "N/A",
         avatar: driverData.avatar || googleUser.photoURL,
       });
+
       setIsLinkingGoogleAccount(false);
       setGoogleUser(null);
       setDriverId("");
+
+      // Retorna para o login avisando do sucesso
+      setSuccessMessage(
+        "Conta do Google vinculada com sucesso! Faça login novamente.",
+      );
+      setIsLoginView(true);
     } catch (err) {
       setLinkingError("Erro ao vincular.");
       console.error(err);
@@ -652,7 +716,7 @@ export const AuthPage = () => {
               transition={{ delay: 0.3 }}
               className="text-center text-slate-600 mb-8 text-sm md:text-base"
             >
-              Digite seu ID de motorista para validar seu acesso ao sistema
+              Digite seu ID de motorista para vincular a sua conta Google.
             </motion.p>
 
             {/* Formulário */}
