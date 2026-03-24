@@ -1325,17 +1325,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   });
 
   const currentUser = auth.currentUser;
-  usePresence(
-    currentUser?.uid || null,
-    "admin",
-    currentUser
-      ? {
-          name: adminProfile.name || currentUser.displayName || "Admin",
-          email: currentUser.email || "",
-        }
-      : null,
-    true,
-  );
+  const presenceMetadata = useMemo(() => {
+    if (!currentUser) return null;
+    return {
+      name: adminProfile.name || currentUser.displayName || "Admin",
+      email: currentUser.email || "",
+    };
+  }, [adminProfile.name, currentUser?.displayName, currentUser?.email]);
+
+  usePresence(currentUser?.uid || null, "admin", presenceMetadata, true);
 
   useEffect(() => {
     const updateDateTime = () => {

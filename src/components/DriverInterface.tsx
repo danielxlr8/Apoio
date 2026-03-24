@@ -1165,18 +1165,15 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     },
   ];
 
-  usePresence(
-    userId || null,
-    "driver",
-    driver
-      ? {
-          name: driver.name || "Motorista",
-          email: auth.currentUser?.email || "",
-        }
-      : null,
-    true,
-  );
+  const presenceMetadata = useMemo(() => {
+    if (!driver) return null;
+    return {
+      name: driver.name || "Motorista",
+      email: auth.currentUser?.email || "",
+    };
+  }, [driver?.name, auth.currentUser?.email]);
 
+  usePresence(userId || null, "driver", presenceMetadata, true);
   const TABS = useMemo(
     () => [
       { id: "availability", label: "Status", icon: <Zap size={20} /> },
