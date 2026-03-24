@@ -53,6 +53,10 @@ import {
   Palette,
   Star,
   LogOut,
+  BarChart3, // Ícones para métricas
+  Timer,
+  PackageCheck,
+  TrendingUp,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -144,7 +148,8 @@ interface ColumnConfig {
   colorClass: string;
 }
 
-type AdminView = "kanban" | "excluded" | "history" | "profile";
+// 1️⃣ ADICIONADO "analytics" na lista de views
+type AdminView = "kanban" | "excluded" | "history" | "profile" | "analytics";
 
 interface AdminDashboardProps {
   calls: SupportCall[];
@@ -1257,6 +1262,7 @@ const viewTitles: Record<string, string> = {
   excluded: "Solicitações Excluídas (Lixeira)",
   history: "Histórico de Solicitações",
   profile: "Perfil e Configurações",
+  analytics: "Métricas Operacionais", // 2️⃣ Título adicionado
 };
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
@@ -1839,13 +1845,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  // ✅ NOVA FUNÇÃO: Retornar para Aberto limpando o prestador
   const handleRevertToAberto = async (call: SupportCall) => {
     try {
       const updates = {
         status: "ABERTO",
-        assignedTo: null,
-        prestador: null,
+        assignedTo: deleteField(),
+        prestador: deleteField(),
       };
       await updateCall(call.id, updates as any);
 
@@ -1907,12 +1912,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   const handleRestore = (callId: string) => {
-    updateCall(callId, {
-      status: "ABERTO",
-      deletedAt: null,
-      assignedTo: null,
-      prestador: null,
-    } as any);
+    updateCall(callId, { status: "ABERTO", deletedAt: deleteField() });
     showNotification("success", "Restaurado", "Chamado voltou para Abertos.");
   };
 
@@ -2357,6 +2357,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 Histórico
               </span>
             </Button>
+            {/* 3️⃣ BOTÃO DE MÉTRICAS NO MENU */}
+            <Button
+              variant={adminView === "analytics" ? "secondary" : "ghost"}
+              className={cn(
+                "gap-2 justify-start",
+                isSidebarCollapsed && "justify-center",
+              )}
+              onClick={() => setAdminView("analytics")}
+            >
+              <BarChart3 size={18} />{" "}
+              <span className={cn(isSidebarCollapsed && "hidden")}>
+                Métricas
+              </span>
+            </Button>
           </nav>
           <div className="mt-auto flex flex-col gap-2">
             <Button
@@ -2730,6 +2744,199 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </React.Fragment>
                       ))}
                   </ResizablePanelGroup>
+                </div>
+              )}
+
+              {/* 4️⃣ BLOCO DE MÉTRICAS ANALYTICS AQUI! */}
+              {adminView === "analytics" && (
+                <div className="tab-content-enter space-y-6">
+                  <h2 className="text-xl font-bold text-foreground mb-4">
+                    Dashboard de Métricas
+                  </h2>
+
+                  {(() => {
+                    // Pega todos os chamados que estão nas abas de histórico (ignora os abertos/em andamento atuais)
+                    const historico = filteredHistoryCalls;
+                    const chamadosConcluidos = historico.filter(
+                      (c) => c.status === "CONCLUIDO",
+                    );
+                    const chamadosDevolvidos = historico.filter(
+                      (c) => c.status === "DEVOLUCAO",
+                    );
+                    const totalGeral =
+                      chamadosConcluidos.length + chamadosDevolvidos.length;
+
+                    // Taxa de Sucesso
+                    const taxaSucesso =
+                      totalGeral > 0
+                        ? Math.round(
+                            (chamadosConcluidos.length / totalGeral) * 100,
+                          )
+                        : 0;
+
+                    // Soma de Pacotes Salvos
+                    const pacotesSalvos = chamadosConcluidos.reduce(
+                      (acc, call) => acc + (call.packageCount || 0),
+                      0,
+                    );
+
+                    // Tempo Médio e Horário de Pico
+                    let tempoTotalMs = 0;
+                    let chamadosValidosTempo = 0;
+                    const hoursCount: Record<number, number> = {};
+
+                    historico.forEach((call) => {
+                      const start =
+                        call.timestamp instanceof Timestamp
+                          ? call.timestamp.toDate()
+                          : new Date((call.timestamp as any)?.seconds * 1000);
+
+                      // Conta para horário de pico
+                      if (start) {
+                        const hour = start.getHours();
+                        hoursCount[hour] = (hoursCount[hour] || 0) + 1;
+                      }
+
+                      // Calcula tempo médio (somente os concluídos)
+                      if (call.status === "CONCLUIDO") {
+                        const end = (call as any).finishedAt
+                          ? (call as any).finishedAt instanceof Timestamp
+                            ? (call as any).finishedAt.toDate()
+                            : new Date((call as any).finishedAt?.seconds * 1000)
+                          : (call as any).approvedAt
+                            ? (call as any).approvedAt instanceof Timestamp
+                              ? (call as any).approvedAt.toDate()
+                              : new Date(
+                                  (call as any).approvedAt?.seconds * 1000,
+                                )
+                            : null;
+
+                        if (start && end && end > start) {
+                          tempoTotalMs += end.getTime() - start.getTime();
+                          chamadosValidosTempo++;
+                        }
+                      }
+                    });
+
+                    // Achar a hora de pico
+                    let horaPico = -1;
+                    let maxPico = 0;
+                    Object.entries(hoursCount).forEach(([hour, count]) => {
+                      if (count > maxPico) {
+                        maxPico = count;
+                        horaPico = parseInt(hour);
+                      }
+                    });
+                    const formatHoraPico =
+                      horaPico !== -1
+                        ? `${horaPico}h às ${horaPico + 1}h`
+                        : "--";
+
+                    // Formatar tempo médio
+                    const mediaMs =
+                      chamadosValidosTempo > 0
+                        ? tempoTotalMs / chamadosValidosTempo
+                        : 0;
+                    const minutosMedios = Math.round(mediaMs / 60000);
+                    const tempoFormatado =
+                      minutosMedios > 60
+                        ? `${Math.floor(minutosMedios / 60)}h ${minutosMedios % 60}m`
+                        : `${minutosMedios} min`;
+
+                    return (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                        <Card className="p-6 bg-gradient-to-br from-blue-500/10 to-blue-600/5 border-blue-500/20 shadow-lg relative overflow-hidden">
+                          <div className="absolute -right-4 -top-4 opacity-5 pointer-events-none">
+                            <Timer size={100} />
+                          </div>
+                          <div className="flex items-start justify-between relative z-10">
+                            <div>
+                              <p className="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider mb-2">
+                                Tempo Médio
+                              </p>
+                              <h3 className="text-3xl font-black text-foreground">
+                                {chamadosValidosTempo > 0
+                                  ? tempoFormatado
+                                  : "--"}
+                              </h3>
+                              <p className="text-[10px] font-medium text-muted-foreground mt-2 uppercase tracking-wide">
+                                Da criação à conclusão
+                              </p>
+                            </div>
+                            <div className="p-3 bg-blue-500/20 rounded-2xl text-blue-600 dark:text-blue-400 shadow-inner">
+                              <Timer size={24} />
+                            </div>
+                          </div>
+                        </Card>
+
+                        <Card className="p-6 bg-gradient-to-br from-orange-500/10 to-orange-600/5 border-orange-500/20 shadow-lg relative overflow-hidden">
+                          <div className="absolute -right-4 -top-4 opacity-5 pointer-events-none">
+                            <PackageCheck size={100} />
+                          </div>
+                          <div className="flex items-start justify-between relative z-10">
+                            <div>
+                              <p className="text-xs font-bold text-orange-600 dark:text-orange-400 uppercase tracking-wider mb-2">
+                                Pacotes Salvos
+                              </p>
+                              <h3 className="text-3xl font-black text-foreground">
+                                {pacotesSalvos}
+                              </h3>
+                              <p className="text-[10px] font-medium text-muted-foreground mt-2 uppercase tracking-wide">
+                                Volumes entregues com apoio
+                              </p>
+                            </div>
+                            <div className="p-3 bg-orange-500/20 rounded-2xl text-orange-600 dark:text-orange-400 shadow-inner">
+                              <PackageCheck size={24} />
+                            </div>
+                          </div>
+                        </Card>
+
+                        <Card className="p-6 bg-gradient-to-br from-green-500/10 to-green-600/5 border-green-500/20 shadow-lg relative overflow-hidden">
+                          <div className="absolute -right-4 -top-4 opacity-5 pointer-events-none">
+                            <TrendingUp size={100} />
+                          </div>
+                          <div className="flex items-start justify-between relative z-10">
+                            <div>
+                              <p className="text-xs font-bold text-green-600 dark:text-green-400 uppercase tracking-wider mb-2">
+                                Taxa de Sucesso
+                              </p>
+                              <h3 className="text-3xl font-black text-foreground">
+                                {taxaSucesso}%
+                              </h3>
+                              <p className="text-[10px] font-medium text-muted-foreground mt-2 uppercase tracking-wide">
+                                Resolvidos sem devolução
+                              </p>
+                            </div>
+                            <div className="p-3 bg-green-500/20 rounded-2xl text-green-600 dark:text-green-400 shadow-inner">
+                              <TrendingUp size={24} />
+                            </div>
+                          </div>
+                        </Card>
+
+                        <Card className="p-6 bg-gradient-to-br from-red-500/10 to-red-600/5 border-red-500/20 shadow-lg relative overflow-hidden">
+                          <div className="absolute -right-4 -top-4 opacity-5 pointer-events-none">
+                            <AlertOctagon size={100} />
+                          </div>
+                          <div className="flex items-start justify-between relative z-10">
+                            <div>
+                              <p className="text-xs font-bold text-red-600 dark:text-red-400 uppercase tracking-wider mb-2">
+                                Horário de Pico
+                              </p>
+                              <h3 className="text-3xl font-black text-foreground tracking-tighter">
+                                {formatHoraPico}
+                              </h3>
+                              <p className="text-[10px] font-medium text-muted-foreground mt-2 uppercase tracking-wide">
+                                Maior volume de pedidos ({maxPico})
+                              </p>
+                            </div>
+                            <div className="p-3 bg-red-500/20 rounded-2xl text-red-600 dark:text-red-400 shadow-inner">
+                              <Zap size={24} />
+                            </div>
+                          </div>
+                        </Card>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 

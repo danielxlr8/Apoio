@@ -126,7 +126,7 @@ function App() {
       q,
       (snapshot) => {
         const driversData = snapshot.docs.map((doc) => ({
-          uid: doc.id,
+          uid: doc.id, // O id do documento no firebase vira o uid do driver
           ...doc.data(),
         })) as Driver[];
         setDrivers(driversData);
@@ -223,8 +223,18 @@ function App() {
               getDocs(qGoogleUid),
             ]);
             const driverDoc = uidSnapshot.docs[0] || googleUidSnapshot.docs[0];
+
             if (driverDoc && driverDoc.exists()) {
               const driverData = driverDoc.data() as Driver;
+
+              // 🔥 CORREÇÃO: Garante que se logou com Google e o banco não tinha 'uid',
+              // a gente salva o uid do Google como o 'uid' principal na sessão.
+              // Isso evita que o DriverInterface trave procurando o 'uid' e achando undefined.
+              if (googleUidSnapshot.docs[0] && !driverData.uid) {
+                await updateDoc(driverDoc.ref, { uid: currentUser.uid });
+                driverData.uid = currentUser.uid;
+              }
+
               resolvedUserData = {
                 uid: currentUser.uid,
                 email: currentUser.email!,
@@ -414,10 +424,21 @@ function App() {
       case "driver":
         const currentUser = auth.currentUser;
         if (!currentUser) return <AuthPage />;
+
+        // 🔥 CORREÇÃO: Buscando o motorista pelo UID (que já mapeamos como doc.id ou uid/googleUid)
         const driverProfile = drivers.find(
           (d) => d.uid === currentUser.uid || d.googleUid === currentUser.uid,
         );
-        if (driverProfile) return <DriverInterface driver={driverProfile} />;
+
+        // 🔥 CORREÇÃO: Garante que o driverProfile tem o uid principal antes de passar pro DriverInterface
+        if (driverProfile) {
+          const completeDriverProfile = {
+            ...driverProfile,
+            uid: driverProfile.uid || currentUser.uid, // Força o uid a existir
+          };
+          return <DriverInterface driver={completeDriverProfile} />;
+        }
+
         return (
           <div className="flex items-center justify-center h-screen">
             <p>Carregando perfil...</p>
