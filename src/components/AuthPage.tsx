@@ -81,6 +81,7 @@ const IDS_AUTORIZADOS = [
   "2174736", // Ronal José Velasquez Berroteran
   "332194", // Rafael Antônio Marenda Soares
   "918480", // Rosalvo Pinheiro de souza martins
+  "925911", //
   "33333", //teste
   "222222", //teste2
   // Adicione quantos IDs quiser aqui, sempre entre aspas e separados por vírgula
