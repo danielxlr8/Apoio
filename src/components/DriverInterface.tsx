@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import { AnimatePresence } from "framer-motion";
 import Joyride, {
   Step,
   CallBackProps,
@@ -57,6 +58,7 @@ import {
   Mic,
   Smartphone,
   Copy, // Ícone de Copiar adicionado
+  Trash2, // Ícone para excluir conta
 } from "lucide-react";
 import { auth, db, storage } from "../firebase";
 import {
@@ -76,11 +78,13 @@ import {
   addDoc,
   GeoPoint,
   runTransaction,
+  deleteDoc, // Importado para apagar o documento na exclusão
 } from "firebase/firestore";
 import {
   updatePassword,
   EmailAuthProvider,
   reauthenticateWithCredential,
+  deleteUser, // Importado para apagar o Auth
 } from "firebase/auth";
 import {
   ref,
@@ -1044,6 +1048,12 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
   const [tourStepIndex, setTourStepIndex] = useState(0);
   const [showConfetti, setShowConfetti] = useState(false);
 
+  // --- NOVOS ESTADOS PARA EXCLUSÃO DE CONTA ---
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const userId = auth.currentUser?.uid;
   const isInitialOpenCallsLoad = useRef(true);
@@ -1483,29 +1493,41 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     }
   };
 
+  // ✅ CORREÇÃO AQUI: Busca robusta do ID do motorista baseada na sessão atual ou nos dados em memória
   useEffect(() => {
     const fetchShopeeId = async () => {
-      if (driver?.uid) {
+      const currentUser = auth.currentUser;
+      if (currentUser) {
         setShopeeId("Carregando...");
-        const driversRef = collection(db, "motoristas_pre_aprovados");
-        const q = query(
-          driversRef,
-          or(
-            where("uid", "==", driver.uid),
-            where("googleUid", "==", driver.uid),
-          ),
-        );
         try {
+          // Busca o motorista pelo UID atual da sessão de forma definitiva
+          const driversRef = collection(db, "motoristas_pre_aprovados");
+          const q = query(
+            driversRef,
+            or(
+              where("uid", "==", currentUser.uid),
+              where("googleUid", "==", currentUser.uid),
+            ),
+          );
           const querySnapshot = await getDocs(q);
-          if (!querySnapshot.empty) setShopeeId(querySnapshot.docs[0].id);
-          else setShopeeId("Não encontrado");
+          if (!querySnapshot.empty) {
+            setShopeeId(querySnapshot.docs[0].id);
+          } else {
+            // Fallback: se por algum milagre ele não achou via query, usa o ID mapeado pelo App.tsx
+            const idToSet =
+              (driver as any).shopeeId ||
+              (driver as any).document_id ||
+              driver?.uid ||
+              "Não encontrado";
+            setShopeeId(idToSet);
+          }
         } catch (error) {
           setShopeeId("Erro ao buscar");
         }
       }
     };
     fetchShopeeId();
-  }, [driver?.uid]);
+  }, [driver, auth.currentUser]);
 
   const toggleMute = () => {
     const newMutedState = !isMuted;
@@ -1825,14 +1847,13 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     );
   };
 
-  // ✅ CORREÇÃO DEFINITIVA DO BUG DO VÍNCULO FANTASMA NO DRIVER
   const handleCancelSupport = async (id: string) => {
     if (!userId || !shopeeId) return;
     setLocalDriverStatus("DISPONIVEL");
     try {
       await updateCall(id, {
-        assignedTo: null, // Força a anulação do ID
-        prestador: null, // Força a anulação do objeto do prestador
+        assignedTo: null,
+        prestador: null,
         status: "ABERTO",
       } as any);
       await updateDriver(shopeeId, { status: "DISPONIVEL" });
@@ -1964,6 +1985,72 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       setReauthError("Senha incorreta.");
     } finally {
       setIsReauthenticating(false);
+    }
+  };
+
+  // ✅ NOVA FUNÇÃO: DELETAR CONTA PERMANENTEMENTE
+  const handleDeleteAccount = async () => {
+    const user = auth.currentUser;
+    if (!user || !shopeeId) return;
+
+    if (localDriverStatus !== "INDISPONIVEL") {
+      setDeleteError("Fique INDISPONÍVEL antes de excluir a conta.");
+      return;
+    }
+
+    setIsDeleting(true);
+    setDeleteError("");
+
+    try {
+      // Se for usuário de e-mail/senha, obriga a confirmação da senha (Regra do Firebase)
+      if (!isGoogleUser) {
+        if (!deletePassword) {
+          setDeleteError("Digite sua senha para confirmar a exclusão.");
+          setIsDeleting(false);
+          return;
+        }
+        const credential = EmailAuthProvider.credential(
+          user.email!,
+          deletePassword,
+        );
+        await reauthenticateWithCredential(user, credential);
+      }
+
+      // 1. Apaga o documento do Firestore (A ficha com o ID)
+      await deleteDoc(doc(db, "motoristas_pre_aprovados", shopeeId));
+
+      // 2. Apaga a conta de login do Firebase Auth
+      await deleteUser(user);
+
+      // 3. Limpa o lixo local e joga pra fora
+      localStorage.clear();
+      sessionStorage.clear();
+      showNotification(
+        "success",
+        "Despedida",
+        "Sua conta foi excluída com sucesso.",
+      );
+
+      // Um pequeno delay para o motorista ler a notificação antes de recarregar a tela
+      setTimeout(() => {
+        window.location.reload();
+      }, 1500);
+    } catch (err: any) {
+      console.error("Erro ao excluir conta:", err);
+      if (
+        err.code === "auth/wrong-password" ||
+        err.code === "auth/invalid-credential"
+      ) {
+        setDeleteError("A senha digitada está incorreta.");
+      } else if (err.code === "auth/requires-recent-login") {
+        setDeleteError(
+          "Sessão muito antiga. Saia, faça login novamente e tente excluir.",
+        );
+      } else {
+        setDeleteError("Erro ao tentar excluir a conta: " + err.message);
+      }
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -3512,6 +3599,41 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                   </section>
                 )}
 
+                <section
+                  className={cn(
+                    "rounded-[1.5rem] p-5 space-y-4 border transition-all mt-6",
+                    theme === "dark"
+                      ? "bg-red-950/20 border-red-500/30 backdrop-blur-sm"
+                      : "bg-red-50 border-red-200/50",
+                  )}
+                >
+                  <h4
+                    className={cn(
+                      "text-xs font-bold uppercase mb-2 tracking-wide",
+                      theme === "dark" ? "text-red-400" : "text-red-600",
+                    )}
+                  >
+                    Zona de Perigo
+                  </h4>
+                  <p
+                    className={cn(
+                      "text-xs",
+                      theme === "dark" ? "text-white/60" : "text-slate-600",
+                    )}
+                  >
+                    A exclusão da conta é permanente. Todos os seus dados,
+                    histórico e acesso serão apagados do sistema e não poderão
+                    ser recuperados.
+                  </p>
+                  <button
+                    onClick={() => setIsDeleteModalOpen(true)}
+                    disabled={isProfileEditingLocked}
+                    className="w-full py-3 mt-2 rounded-xl font-bold text-sm text-red-600 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  >
+                    <Trash2 size={16} /> Excluir Minha Conta
+                  </button>
+                </section>
+
                 {(driver as any).ratingCount > 0 && (
                   <section
                     className={cn(
@@ -3740,9 +3862,11 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                               className="w-[260px] sm:max-w-xs bg-slate-800 text-white border border-orange-500/50 p-3 rounded-xl z-[99999] shadow-2xl whitespace-normal break-words"
                             >
                               <p className="text-xs text-center leading-relaxed">
-                                Anexe o arquivo CSV do romaneio. Não sabe como
-                                baixar? <b>Pergunte ao Chatbot (Shopito)</b> no
-                                canto da tela!
+                                Anexe o arquivo CSV ou Excel (.xlsx) do
+                                romaneio. O sistema converte automaticamente!
+                                Não sabe como baixar?{" "}
+                                <b>Pergunte ao Chatbot (Shopito)</b> no canto da
+                                tela!
                               </p>
                             </TooltipContent>
                           </Tooltip>
@@ -3751,7 +3875,7 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
                       <input
                         type="file"
                         onChange={handleRomaneioFileChange}
-                        accept=".csv"
+                        accept=".csv, .xlsx, .xls"
                         className="w-full p-2 bg-slate-700/90 backdrop-blur-xl border border-slate-600/50 rounded-xl text-sm text-white file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-bold file:bg-orange-500 file:text-white hover:file:bg-orange-600 outline-none shadow-lg shadow-black/10 cursor-pointer"
                         required
                       />
@@ -4003,6 +4127,70 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
               </div>
             </div>
           )}
+
+          {/* MODAL DE CONFIRMAÇÃO PARA DELETAR A CONTA */}
+          <AnimatePresence>
+            {isDeleteModalOpen && (
+              <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 sm:p-6 bg-slate-900/90 backdrop-blur-sm animate-in fade-in">
+                <div className="bg-slate-800/95 backdrop-blur-2xl rounded-3xl p-6 md:p-8 text-center max-w-sm w-full shadow-2xl shadow-black/40 border border-red-500/50">
+                  <div className="flex justify-between items-center mb-4">
+                    <h2 className="text-xl font-bold text-red-400 flex items-center gap-2">
+                      <AlertTriangle size={24} /> Excluir Conta
+                    </h2>
+                    <button
+                      onClick={() => setIsDeleteModalOpen(false)}
+                      className="text-white/50 hover:text-white"
+                    >
+                      <X size={20} />
+                    </button>
+                  </div>
+                  <p className="text-sm text-white/70 mb-4 text-left">
+                    Tem certeza que deseja excluir sua conta e ID?{" "}
+                    <b>Esta ação não pode ser desfeita.</b>
+                  </p>
+
+                  {!isGoogleUser && (
+                    <input
+                      type="password"
+                      value={deletePassword}
+                      onChange={(e) => setDeletePassword(e.target.value)}
+                      placeholder="Confirme sua senha"
+                      className="w-full p-4 rounded-xl text-sm bg-slate-700/90 text-white mb-2 focus:ring-2 focus:ring-red-500/50 outline-none border border-slate-600"
+                    />
+                  )}
+
+                  {deleteError && (
+                    <p className="text-red-400 text-xs mb-4 font-bold text-left">
+                      {deleteError}
+                    </p>
+                  )}
+
+                  <div className="flex gap-3 mt-6">
+                    <button
+                      onClick={() => setIsDeleteModalOpen(false)}
+                      disabled={isDeleting}
+                      className="flex-1 py-3 rounded-xl font-bold text-sm bg-slate-700 text-white hover:bg-slate-600 transition-all"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={handleDeleteAccount}
+                      disabled={
+                        isDeleting || (!isGoogleUser && !deletePassword)
+                      }
+                      className="flex-1 py-3 rounded-xl font-bold text-sm bg-red-600 text-white hover:bg-red-700 transition-all flex items-center justify-center gap-2"
+                    >
+                      {isDeleting ? (
+                        <Loading size="sm" variant="spinner" />
+                      ) : (
+                        "Sim, Excluir"
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </AnimatePresence>
 
           {showSuccessModal && (
             <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-slate-900/90 backdrop-blur-sm animate-in fade-in">

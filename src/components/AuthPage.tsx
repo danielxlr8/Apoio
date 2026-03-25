@@ -85,7 +85,7 @@ const IDS_AUTORIZADOS = [
   "2215574", // Luana Teixeira
   "33333", //teste
   "222222", //teste2
-  // Adicione quantos IDs quiser aqui, sempre entre aspas e separados por vírgula
+  "2172201", // miguel ribeiro
 ];
 
 export const AuthPage = () => {
@@ -438,7 +438,6 @@ export const AuthPage = () => {
     }
   };
 
-  // 🚀 AQUI É A CORREÇÃO DO CADASTRO NORMAL DE DRIVER (EMAIL E SENHA)
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -456,57 +455,61 @@ export const AuthPage = () => {
     }
 
     try {
-      const userCredential = await createUserWithEmailAndPassword(
-        auth,
-        email,
-        password,
-      );
-      const user = userCredential.user;
-
       if (activeTab === "driver") {
         const idDigitado = driverId.trim();
-        const isInjetado = IDS_AUTORIZADOS.includes(idDigitado); // Olha na sua lista!
+        const isInjetado = IDS_AUTORIZADOS.map((id) => id.trim()).includes(
+          idDigitado,
+        );
 
         const driverDocRef = doc(db, "motoristas_pre_aprovados", idDigitado);
         const driverDoc = await getDoc(driverDocRef);
 
-        // Se não tá na sua lista de cima E também não tá no Firebase, bloqueia!
         if (!isInjetado && !driverDoc.exists()) {
           setError("ID inválido ou não autorizado.");
-          await user.delete();
           setLoading(false);
           return;
         }
 
-        // Se já existe no banco e já foi usado (tem uid)
         if (
           driverDoc.exists() &&
           (driverDoc.data().uid || driverDoc.data().googleUid)
         ) {
           setError("Este ID já está vinculado a outra conta.");
-          await user.delete();
           setLoading(false);
           return;
         }
 
-        // Monta a ficha do cara
+        const userCredential = await createUserWithEmailAndPassword(
+          auth,
+          email,
+          password,
+        );
+        const user = userCredential.user;
+
         const driverDataToSave = {
           name: `${name} ${lastName}`,
           phone: phone.replace(/\D/g, ""),
           birthDate,
           email: user.email,
           uid: user.uid,
+          shopeeId: idDigitado, // ✅ SALVA O ID AQUI
+          document_id: idDigitado, // ✅ E AQUI
           status: "INDISPONIVEL",
           createdAt: serverTimestamp(),
         };
 
-        // Se a ficha não existia lá no Firebase (mas ele tava na sua lista local), cria a ficha dele agora!
         if (driverDoc.exists()) {
           await updateDoc(driverDocRef, driverDataToSave);
         } else {
           await setDoc(driverDocRef, driverDataToSave);
         }
       } else {
+        const userCredential = await createUserWithEmailAndPassword(
+          auth,
+          email,
+          password,
+        );
+        const user = userCredential.user;
         await sendEmailVerification(user);
         const adminDocRef = doc(db, "admins_pre_aprovados", user.uid);
         await setDoc(adminDocRef, {
@@ -581,7 +584,6 @@ export const AuthPage = () => {
     }
   };
 
-  // 🚀 AQUI É A CORREÇÃO DO CADASTRO DO GOOGLE
   const handleLinkAccount = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -595,18 +597,18 @@ export const AuthPage = () => {
     }
 
     try {
-      const isInjetado = IDS_AUTORIZADOS.includes(idDigitado); // Olha na sua lista!
+      const isInjetado = IDS_AUTORIZADOS.map((id) => id.trim()).includes(
+        idDigitado,
+      );
       const driverDocRef = doc(db, "motoristas_pre_aprovados", idDigitado);
       const driverDoc = await getDoc(driverDocRef);
 
-      // Se não tá na sua lista local e não tá no banco
       if (!isInjetado && !driverDoc.exists()) {
         setLinkingError("ID inválido ou não autorizado.");
         setLoading(false);
         return;
       }
 
-      // Se já tá em uso
       if (
         driverDoc.exists() &&
         (driverDoc.data().uid || driverDoc.data().googleUid)
@@ -618,8 +620,10 @@ export const AuthPage = () => {
 
       const driverDataToSave = {
         googleUid: googleUser.uid,
-        uid: googleUser.uid, // Já joga o UID pro App.tsx não se perder
+        uid: googleUser.uid,
         email: googleUser.email,
+        shopeeId: idDigitado, // ✅ SALVA O ID AQUI TAMBÉM
+        document_id: idDigitado, // ✅ E AQUI TAMBÉM
         name:
           (driverDoc.exists() ? driverDoc.data().name : "") ||
           googleUser.displayName ||
