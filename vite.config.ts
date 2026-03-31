@@ -11,12 +11,18 @@ export default defineConfig({
   },
   build: {
     outDir: "dist",
+    rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, "index.html"),
+        landing: path.resolve(__dirname, "landing.html"),
+      },
+    },
   },
   server: {
     host: true,
     port: 3000,
-    strictPort: true, // garante que o Vite rode na porta 3000
-    cors: true, // libera requisições externas
-    allowedHosts: ["localhost"], // libera hosts externos
+    strictPort: true,
+    cors: true,
+    allowedHosts: ["localhost"],
   },
 });
