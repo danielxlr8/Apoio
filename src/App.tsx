@@ -17,7 +17,7 @@ import {
   updateDoc,
 } from "firebase/firestore";
 import axios from "axios";
-import { AuthPage } from "./components/AuthPage";
+import { PremiumAuthPage } from "./components/PremiumAuthPage";
 import { AdminDashboard } from "./components/AdminDashboard";
 import { DriverInterface } from "./components/DriverInterface";
 import { VerifyEmailPage } from "./components/VerifyEmailPage";
@@ -372,7 +372,7 @@ function App() {
   const renderContent = () => {
     if (loading || callsLoading || driversLoading) return <LoadingScreen />;
     if (user && isAdminUnverified) return <VerifyEmailPage user={user} />;
-    if (!user || !userData) return <AuthPage />;
+    if (!user || !userData) return <PremiumAuthPage />;
 
     if (callsError || driversError) {
       return (
@@ -413,7 +413,7 @@ function App() {
         );
       case "driver":
         const currentUser = auth.currentUser;
-        if (!currentUser) return <AuthPage />;
+        if (!currentUser) return <PremiumAuthPage />;
         const driverProfile = drivers.find(
           (d) => d.uid === currentUser.uid || d.googleUid === currentUser.uid,
         );
@@ -425,7 +425,7 @@ function App() {
         );
       default:
         signOut(auth);
-        return <AuthPage />;
+        return <PremiumAuthPage />;
     }
   };
 
