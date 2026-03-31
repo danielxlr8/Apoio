@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import { PushNotifications } from "@capacitor/push-notifications";
+import { Capacitor } from "@capacitor/core";
 import { AnimatePresence } from "framer-motion";
 import Joyride, {
   Step,
@@ -20,6 +22,9 @@ import L from "leaflet";
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
 import markerIcon from "leaflet/dist/images/marker-icon.png";
 import markerShadow from "leaflet/dist/images/marker-shadow.png";
+
+// --- IMPORT SHEETJS PARA EXCEL ---
+import * as XLSX from "xlsx";
 
 import {
   Clock,
@@ -57,8 +62,8 @@ import {
   Star,
   Mic,
   Smartphone,
-  Copy, // Ícone de Copiar adicionado
-  Trash2, // Ícone para excluir conta
+  Copy,
+  Trash2,
 } from "lucide-react";
 import { auth, db, storage } from "../firebase";
 import {
@@ -78,13 +83,13 @@ import {
   addDoc,
   GeoPoint,
   runTransaction,
-  deleteDoc, // Importado para apagar o documento na exclusão
+  deleteDoc,
 } from "firebase/firestore";
 import {
   updatePassword,
   EmailAuthProvider,
   reauthenticateWithCredential,
-  deleteUser, // Importado para apagar o Auth
+  deleteUser,
 } from "firebase/auth";
 import {
   ref,
@@ -363,7 +368,6 @@ const DriverRatingBadge = ({
         </div>
 
         <div className="space-y-4">
-          {/* Média Geral em Destaque */}
           <div className="flex items-center justify-between p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/20 shadow-inner">
             <span
               className={cn(
@@ -385,7 +389,6 @@ const DriverRatingBadge = ({
             </div>
           </div>
 
-          {/* Categorias Individuais */}
           <div className="space-y-2.5 px-1">
             {[
               { label: "Atendimento", key: "ratingAtendimentoAvg" },
@@ -419,7 +422,6 @@ const DriverRatingBadge = ({
             })}
           </div>
 
-          {/* Rodapé com Total de Avaliações */}
           <div className="pt-3 border-t border-border/50 text-center">
             <p
               className={cn(
@@ -591,7 +593,6 @@ const DriverCallHistoryCard = ({
           </span>
         </div>
 
-        {/* BLOCO DO SOLICITANTE MELHORADO COM BOTÃO COPIAR */}
         <div className="col-span-2">
           <span
             className={cn(
@@ -651,7 +652,6 @@ const DriverCallHistoryCard = ({
           </div>
         </div>
 
-        {/* BLOCO DO PRESTADOR MELHORADO COM BOTÃO COPIAR */}
         {prestador && (
           <div className="col-span-2">
             <span
@@ -832,7 +832,6 @@ const DriverCallHistoryCard = ({
               </Button>
             )}
 
-            {/* ✅ BOTÃO DE CANCELAR DINÂMICO PARA O PRESTADOR */}
             {!isRequester &&
               ["EM ANDAMENTO", "AGUARDANDO_APROVACAO", "ABERTO"].includes(
                 call.status,
@@ -1493,14 +1492,12 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     }
   };
 
-  // ✅ CORREÇÃO AQUI: Busca robusta do ID do motorista baseada na sessão atual ou nos dados em memória
   useEffect(() => {
     const fetchShopeeId = async () => {
       const currentUser = auth.currentUser;
       if (currentUser) {
         setShopeeId("Carregando...");
         try {
-          // Busca o motorista pelo UID atual da sessão de forma definitiva
           const driversRef = collection(db, "motoristas_pre_aprovados");
           const q = query(
             driversRef,
@@ -1513,7 +1510,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
           if (!querySnapshot.empty) {
             setShopeeId(querySnapshot.docs[0].id);
           } else {
-            // Fallback: se por algum milagre ele não achou via query, usa o ID mapeado pelo App.tsx
             const idToSet =
               (driver as any).shopeeId ||
               (driver as any).document_id ||
@@ -1597,10 +1593,11 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     };
   }, [localDriverStatus, isMuted]);
 
+  // ==========================================
+  // OTIMIZAÇÃO 1: FETCH DRIVERS APENAS 1 VEZ
+  // ==========================================
   useEffect(() => {
     if (!userId) return;
-
-    // 🔥 BUSCA ÚNICA: Salva a cota do Firebase!
     const fetchAllDrivers = async () => {
       try {
         const allDriversQuery = query(
@@ -1616,6 +1613,49 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
       }
     };
     fetchAllDrivers();
+  }, [userId]);
+
+  // ==========================================
+  // OTIMIZAÇÃO 2: LISTENER OPEN CALLS ISOLADO
+  // ==========================================
+  useEffect(() => {
+    if (!userId) return;
+    const openCallsQuery = query(
+      collection(db, "supportCalls"),
+      where("status", "==", "ABERTO"),
+    );
+    const unsubscribeOpenCalls = onSnapshot(openCallsQuery, (snapshot) => {
+      snapshot.docChanges().forEach((change) => {
+        const callData = {
+          id: change.doc.id,
+          ...change.doc.data(),
+        } as SupportCall;
+        if (!myIdsRef.current.includes(callData.solicitante?.id ?? "")) {
+          if (change.type === "added" && !isInitialOpenCallsLoad.current)
+            triggerNotificationRef.current(callData);
+          if (change.type === "removed")
+            sessionNotifiedCallIds.delete(callData.id);
+        }
+      });
+      isInitialOpenCallsLoad.current = false;
+      const openCallsData = snapshot.docs.map(
+        (doc) => ({ id: doc.id, ...doc.data() }) as SupportCall,
+      );
+      setOpenSupportCalls(
+        openCallsData.filter(
+          (call) => !myIdsRef.current.includes(call.solicitante?.id),
+        ),
+      );
+    });
+
+    return () => unsubscribeOpenCalls();
+  }, [userId]);
+
+  // ==========================================
+  // OTIMIZAÇÃO 3: LISTENER MEUS CHAMADOS (DEPENDE DA DATA)
+  // ==========================================
+  useEffect(() => {
+    if (!userId) return;
 
     const start = startDate ? new Date(startDate) : new Date(0);
     start.setHours(0, 0, 0, 0);
@@ -1699,44 +1739,63 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
         })
       : null;
 
-    const unsubscribeMyCalls = () => {
+    return () => {
       unsubscribeMyCallsAuth();
       if (unsubscribeMyCallsFirestoreUid) unsubscribeMyCallsFirestoreUid();
     };
+  }, [userId, driver?.uid, startDate, endDate]);
 
-    const openCallsQuery = query(
-      collection(db, "supportCalls"),
-      where("status", "==", "ABERTO"),
-    );
-    const unsubscribeOpenCalls = onSnapshot(openCallsQuery, (snapshot) => {
-      snapshot.docChanges().forEach((change) => {
-        const callData = {
-          id: change.doc.id,
-          ...change.doc.data(),
-        } as SupportCall;
-        if (!myIdsRef.current.includes(callData.solicitante?.id ?? "")) {
-          if (change.type === "added" && !isInitialOpenCallsLoad.current)
-            triggerNotificationRef.current(callData);
-          if (change.type === "removed")
-            sessionNotifiedCallIds.delete(callData.id);
-        }
+  // ==========================================
+  // OTIMIZAÇÃO 5: REGISTRO DE NOTIFICAÇÕES PUSH NATIVAS
+  // ==========================================
+  useEffect(() => {
+    if (
+      !shopeeId ||
+      shopeeId === "Carregando..." ||
+      shopeeId === "Erro ao buscar" ||
+      !Capacitor.isNativePlatform()
+    )
+      return;
+
+    const registerPushNotifications = async () => {
+      let permStatus = await PushNotifications.checkPermissions();
+      if (permStatus.receive === "prompt") {
+        permStatus = await PushNotifications.requestPermissions();
+      }
+      if (permStatus.receive !== "granted") {
+        console.log("Permissão para notificações negada pelo usuário.");
+        return;
+      }
+
+      await PushNotifications.register();
+
+      PushNotifications.addListener("registration", async (token) => {
+        console.log("Token FCM gerado com sucesso:", token.value);
+        await updateDriver(shopeeId, { fcmToken: token.value } as any);
       });
-      isInitialOpenCallsLoad.current = false;
-      const openCallsData = snapshot.docs.map(
-        (doc) => ({ id: doc.id, ...doc.data() }) as SupportCall,
+
+      PushNotifications.addListener("registrationError", (error: any) => {
+        console.error("Erro ao registrar Push:", JSON.stringify(error));
+      });
+
+      PushNotifications.addListener(
+        "pushNotificationReceived",
+        (notification) => {
+          showNotification(
+            "info",
+            notification.title || "Novo Aviso",
+            notification.body || "",
+          );
+        },
       );
-      setOpenSupportCalls(
-        openCallsData.filter(
-          (call) => !myIdsRef.current.includes(call.solicitante?.id),
-        ),
-      );
-    });
+    };
+
+    registerPushNotifications();
 
     return () => {
-      unsubscribeMyCalls();
-      unsubscribeOpenCalls();
+      PushNotifications.removeAllListeners();
     };
-  }, [userId, startDate, endDate]);
+  }, [shopeeId]);
 
   const updateDriver = async (
     driverId: string,
@@ -1988,7 +2047,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     }
   };
 
-  // ✅ NOVA FUNÇÃO: DELETAR CONTA PERMANENTEMENTE
   const handleDeleteAccount = async () => {
     const user = auth.currentUser;
     if (!user || !shopeeId) return;
@@ -2002,7 +2060,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     setDeleteError("");
 
     try {
-      // Se for usuário de e-mail/senha, obriga a confirmação da senha (Regra do Firebase)
       if (!isGoogleUser) {
         if (!deletePassword) {
           setDeleteError("Digite sua senha para confirmar a exclusão.");
@@ -2016,13 +2073,9 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
         await reauthenticateWithCredential(user, credential);
       }
 
-      // 1. Apaga o documento do Firestore (A ficha com o ID)
       await deleteDoc(doc(db, "motoristas_pre_aprovados", shopeeId));
-
-      // 2. Apaga a conta de login do Firebase Auth
       await deleteUser(user);
 
-      // 3. Limpa o lixo local e joga pra fora
       localStorage.clear();
       sessionStorage.clear();
       showNotification(
@@ -2031,7 +2084,6 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
         "Sua conta foi excluída com sucesso.",
       );
 
-      // Um pequeno delay para o motorista ler a notificação antes de recarregar a tela
       setTimeout(() => {
         window.location.reload();
       }, 1500);
@@ -2122,30 +2174,69 @@ export const DriverInterface: React.FC<DriverInterfaceProps> = ({ driver }) => {
     }
   };
 
-  const handleRomaneioFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // ==========================================
+  // OTIMIZAÇÃO 4: CONVERSÃO DE EXCEL PARA CSV NO BROWSER
+  // ==========================================
+  const handleRomaneioFileChange = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
     const file = e.target.files?.[0];
-    if (file) {
-      if (!file.name.toLowerCase().endsWith(".csv")) {
-        setModalError(
-          "Formato inválido. Envie apenas o arquivo do romaneio em formato .CSV",
-        );
-        e.target.value = "";
-        setRomaneioText(null);
-        return;
-      }
-      if (file.size > 800 * 1024) {
-        setModalError("O arquivo do romaneio não pode ter mais que 800KB.");
-        e.target.value = "";
-        return;
-      }
+    if (!file) return;
 
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        setRomaneioText(event.target?.result as string);
-        setRomaneioName(file.name);
+    const fileName = file.name.toLowerCase();
+    const isCSV = fileName.endsWith(".csv");
+    const isExcel = fileName.endsWith(".xlsx") || fileName.endsWith(".xls");
+
+    if (!isCSV && !isExcel) {
+      setModalError(
+        "Formato inválido. Envie apenas o arquivo do romaneio em formato .CSV, .XLSX ou .XLS",
+      );
+      e.target.value = "";
+      setRomaneioText(null);
+      return;
+    }
+
+    if (file.size > 800 * 1024) {
+      setModalError("O arquivo do romaneio não pode ter mais que 800KB.");
+      e.target.value = "";
+      return;
+    }
+
+    try {
+      if (isCSV) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          setRomaneioText(event.target?.result as string);
+          setRomaneioName(file.name);
+          setModalError("");
+        };
+        reader.readAsText(file);
+      } else if (isExcel) {
+        const data = await file.arrayBuffer();
+        const workbook = XLSX.read(data, { type: "array" });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const csvString = XLSX.utils.sheet_to_csv(worksheet);
+
+        if (csvString.length > 800 * 1024) {
+          setModalError(
+            "A planilha convertida possui muitos dados e excedeu o limite. Tente enviar uma planilha mais leve.",
+          );
+          e.target.value = "";
+          setRomaneioText(null);
+          return;
+        }
+
+        setRomaneioText(csvString);
+        const newFileName = file.name.replace(/\.(xlsx|xls)$/i, ".csv");
+        setRomaneioName(newFileName);
         setModalError("");
-      };
-      reader.readAsText(file);
+      }
+    } catch (error) {
+      console.error("Erro ao processar planilha:", error);
+      setModalError("Erro ao ler o arquivo. A planilha pode estar corrompida.");
+      e.target.value = "";
+      setRomaneioText(null);
     }
   };
 

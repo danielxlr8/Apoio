@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">supportransfer</string>
+    <string name="title_activity_main">supportransfer</string>
+    <string name="package_name">com.support.transfer</string>
+    <string name="custom_url_scheme">com.support.transfer</string>
+</resources>

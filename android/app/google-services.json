@@ -1,0 +1,40 @@
+{
+  "project_info": {
+    "project_number": "610673332843",
+    "firebase_url": "https://shopee-apoio-9b103-default-rtdb.firebaseio.com",
+    "project_id": "shopee-apoio-9b103",
+    "storage_bucket": "shopee-apoio-9b103.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:610673332843:android:28a523f98edbb95c37972e",
+        "android_client_info": {
+          "package_name": "com.support.transfer"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "610673332843-qrhr8e4i3blb21a17uv56ebcb83tfk6s.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBgZ68Sx6N9RhonJVPX0DRoOtwhrcnNKiI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "610673332843-qrhr8e4i3blb21a17uv56ebcb83tfk6s.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

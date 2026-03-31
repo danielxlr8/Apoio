@@ -21,7 +21,6 @@ import {
   collection,
   updateDoc,
   setDoc,
-  serverTimestamp,
 } from "firebase/firestore";
 import {
   Lock,
@@ -67,27 +66,6 @@ const GoogleIcon = () => (
   </svg>
 );
 
-// 👇 AQUI É A SUA LISTA VIP. Injetou o ID aqui, o cara pode se cadastrar.
-const IDS_AUTORIZADOS = [
-  "3310689", // Jhon Alexander pacheco riano
-  "233415", // Ivone
-  "199297", // Brayan de Souza
-  "1711883", // Lermy José Sanchez durant
-  "1326455", // Larissa marquesine soares
-  "181650", // Hector daniel gonzalez marcano
-  "3002590", // Felipe Borges Pedro
-  "2090554", // Felipe Pinheiro Edling
-  "121791", // Andtrssa paula de souza
-  "2174736", // Ronal José Velasquez Berroteran
-  "332194", // Rafael Antônio Marenda Soares
-  "918480", // Rosalvo Pinheiro de souza martins
-  "90310", //  Elaine dos Santos
-  "2215574", // Luana Teixeira
-  "33333", //teste
-  "222222", //teste2
-  "2172201", // miguel ribeiro
-];
-
 export const AuthPage = () => {
   const [isLoginView, setIsLoginView] = useState(true);
   const [activeTab, setActiveTab] = useState<"admin" | "driver">("driver");
@@ -112,6 +90,7 @@ export const AuthPage = () => {
   >("complete");
   const [isInitialLoading] = useState(false);
 
+  // Estados para recuperação de senha
   const [showRecoverModal, setShowRecoverModal] = useState(false);
   const [recoverEmail, setRecoverEmail] = useState("");
   const [recoverLoading, setRecoverLoading] = useState(false);
@@ -132,6 +111,7 @@ export const AuthPage = () => {
   } | null>(null);
   const [currentDateTime, setCurrentDateTime] = useState<Date>(new Date());
 
+  // Atualizar data/hora do Brasil
   useEffect(() => {
     const updateDateTime = () => {
       const brazilTime = new Date(
@@ -146,6 +126,9 @@ export const AuthPage = () => {
     return () => clearInterval(interval);
   }, []);
 
+  // Loading inicial removido - card aparece imediatamente
+
+  // Buscar dados do admin quando a aba admin estiver selecionada
   useEffect(() => {
     if (activeTab === "admin") {
       const currentUser = auth.currentUser;
@@ -224,6 +207,7 @@ export const AuthPage = () => {
     }
   }, [activeTab]);
 
+  // Buscar dados do motorista quando a aba driver estiver selecionada
   useEffect(() => {
     if (activeTab === "driver") {
       const currentUser = auth.currentUser;
@@ -335,7 +319,9 @@ export const AuthPage = () => {
     }
   }, [activeTab]);
 
+  // Callback quando a animação do foguete termina
   const handleRocketComplete = () => {
+    // Mostra o card quase instantaneamente
     setAnimationPhase("fadeIn");
     setTimeout(() => setAnimationPhase("complete"), 100);
   };
@@ -397,6 +383,7 @@ export const AuthPage = () => {
     }
   };
 
+  // Função de recuperação de senha
   const handlePasswordRecovery = async (e: React.FormEvent) => {
     e.preventDefault();
     setRecoverLoading(true);
@@ -453,63 +440,30 @@ export const AuthPage = () => {
       setLoading(false);
       return;
     }
-
     try {
+      const userCredential = await createUserWithEmailAndPassword(
+        auth,
+        email,
+        password,
+      );
+      const user = userCredential.user;
       if (activeTab === "driver") {
-        const idDigitado = driverId.trim();
-        const isInjetado = IDS_AUTORIZADOS.map((id) => id.trim()).includes(
-          idDigitado,
-        );
-
-        const driverDocRef = doc(db, "motoristas_pre_aprovados", idDigitado);
+        const driverDocRef = doc(db, "motoristas_pre_aprovados", driverId);
         const driverDoc = await getDoc(driverDocRef);
-
-        if (!isInjetado && !driverDoc.exists()) {
-          setError("ID inválido ou não autorizado.");
+        if (!driverDoc.exists() || driverDoc.data().uid) {
+          setError("ID inválido ou já cadastrado.");
+          await user.delete();
           setLoading(false);
           return;
         }
-
-        if (
-          driverDoc.exists() &&
-          (driverDoc.data().uid || driverDoc.data().googleUid)
-        ) {
-          setError("Este ID já está vinculado a outra conta.");
-          setLoading(false);
-          return;
-        }
-
-        const userCredential = await createUserWithEmailAndPassword(
-          auth,
-          email,
-          password,
-        );
-        const user = userCredential.user;
-
-        const driverDataToSave = {
+        await updateDoc(driverDocRef, {
           name: `${name} ${lastName}`,
           phone: phone.replace(/\D/g, ""),
           birthDate,
           email: user.email,
           uid: user.uid,
-          shopeeId: idDigitado, // ✅ SALVA O ID AQUI
-          document_id: idDigitado, // ✅ E AQUI
-          status: "INDISPONIVEL",
-          createdAt: serverTimestamp(),
-        };
-
-        if (driverDoc.exists()) {
-          await updateDoc(driverDocRef, driverDataToSave);
-        } else {
-          await setDoc(driverDocRef, driverDataToSave);
-        }
+        });
       } else {
-        const userCredential = await createUserWithEmailAndPassword(
-          auth,
-          email,
-          password,
-        );
-        const user = userCredential.user;
         await sendEmailVerification(user);
         const adminDocRef = doc(db, "admins_pre_aprovados", user.uid);
         await setDoc(adminDocRef, {
@@ -588,60 +542,31 @@ export const AuthPage = () => {
     e.preventDefault();
     setLoading(true);
     setLinkingError("");
-
-    const idDigitado = driverId.trim();
-    if (!idDigitado) {
+    if (!driverId.trim()) {
       setLinkingError("Insira seu ID.");
       setLoading(false);
       return;
     }
-
     try {
-      const isInjetado = IDS_AUTORIZADOS.map((id) => id.trim()).includes(
-        idDigitado,
-      );
-      const driverDocRef = doc(db, "motoristas_pre_aprovados", idDigitado);
+      const driverDocRef = doc(db, "motoristas_pre_aprovados", driverId.trim());
       const driverDoc = await getDoc(driverDocRef);
-
-      if (!isInjetado && !driverDoc.exists()) {
-        setLinkingError("ID inválido ou não autorizado.");
+      if (!driverDoc.exists()) {
+        setLinkingError("ID não encontrado.");
         setLoading(false);
         return;
       }
-
-      if (
-        driverDoc.exists() &&
-        (driverDoc.data().uid || driverDoc.data().googleUid)
-      ) {
-        setLinkingError("ID já vinculado a outro motorista.");
+      const driverData = driverDoc.data();
+      if (driverData.uid || driverData.googleUid) {
+        setLinkingError("ID já vinculado.");
         setLoading(false);
         return;
       }
-
-      const driverDataToSave = {
+      await updateDoc(driverDoc.ref, {
         googleUid: googleUser.uid,
-        uid: googleUser.uid,
         email: googleUser.email,
-        shopeeId: idDigitado, // ✅ SALVA O ID AQUI TAMBÉM
-        document_id: idDigitado, // ✅ E AQUI TAMBÉM
-        name:
-          (driverDoc.exists() ? driverDoc.data().name : "") ||
-          googleUser.displayName ||
-          "Motorista",
-        avatar:
-          (driverDoc.exists() ? driverDoc.data().avatar : "") ||
-          googleUser.photoURL ||
-          "",
-        status: "INDISPONIVEL",
-        createdAt: serverTimestamp(),
-      };
-
-      if (driverDoc.exists()) {
-        await updateDoc(driverDocRef, driverDataToSave);
-      } else {
-        await setDoc(driverDocRef, driverDataToSave);
-      }
-
+        name: driverData.name || googleUser.displayName || "N/A",
+        avatar: driverData.avatar || googleUser.photoURL,
+      });
       setIsLinkingGoogleAccount(false);
       setGoogleUser(null);
       setDriverId("");
@@ -659,6 +584,7 @@ export const AuthPage = () => {
         className="min-h-screen w-full flex items-center justify-center p-4 relative overflow-hidden"
         style={{ minHeight: "100vh", minWidth: "100vw" }}
       >
+        {/* Background com gradiente Shopee */}
         <div
           className="absolute inset-0 w-full h-full"
           style={{
@@ -668,9 +594,11 @@ export const AuthPage = () => {
           }}
         />
 
+        {/* Overlay com padrão sutil */}
         <div className="absolute inset-0 bg-[url('/pattern.svg')] opacity-5" />
         <div className="absolute inset-0 bg-gradient-to-b from-black/5 via-transparent to-black/10" />
 
+        {/* Card principal */}
         <motion.div
           initial={{ opacity: 0, scale: 0.9, y: 20 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -687,6 +615,7 @@ export const AuthPage = () => {
                 "0 25px 60px -20px rgba(238, 77, 45, 0.4), 0 0 40px rgba(255, 122, 26, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.5)",
             }}
           >
+            {/* Logo/Ícone Shopee */}
             <div className="flex justify-center mb-6">
               <div
                 className="w-20 h-20 rounded-2xl flex items-center justify-center shadow-lg"
@@ -700,6 +629,7 @@ export const AuthPage = () => {
               </div>
             </div>
 
+            {/* Título */}
             <motion.h2
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
@@ -725,6 +655,7 @@ export const AuthPage = () => {
               Digite seu ID de motorista para validar seu acesso ao sistema
             </motion.p>
 
+            {/* Formulário */}
             <form onSubmit={handleLinkAccount} className="space-y-6">
               <motion.div
                 initial={{ opacity: 0, x: -20 }}
@@ -779,6 +710,7 @@ export const AuthPage = () => {
                 )}
               </motion.div>
 
+              {/* Botão de ação */}
               <motion.button
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -813,6 +745,7 @@ export const AuthPage = () => {
                 )}
               </motion.button>
 
+              {/* Botão cancelar */}
               <motion.button
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -833,6 +766,7 @@ export const AuthPage = () => {
               </motion.button>
             </form>
 
+            {/* Informações adicionais */}
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -867,9 +801,11 @@ export const AuthPage = () => {
   const isExpanded =
     animationPhase === "fadeIn" || animationPhase === "complete";
 
+  // Mostrar loading inicial
   if (isInitialLoading) {
     return (
       <div className="min-h-screen w-full flex items-center justify-center bg-black relative overflow-hidden">
+        {/* Vídeo de fundo do loading */}
         <video
           autoPlay
           loop
@@ -883,9 +819,12 @@ export const AuthPage = () => {
           <source src="/pinterest-video (1).mp4" type="video/mp4" />
         </video>
 
+        {/* Overlay escuro */}
         <div className="absolute inset-0 bg-black/60 z-10" />
 
+        {/* Conteúdo do loading */}
         <div className="relative z-20 flex flex-col items-center justify-center gap-8">
+          {/* Texto "Loading" com efeito */}
           <motion.div
             initial={{ opacity: 0, scale: 0.8 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -914,6 +853,7 @@ export const AuthPage = () => {
               LOADING
             </motion.h1>
 
+            {/* Pontos animados */}
             <div className="flex gap-2 justify-center">
               {[0, 1, 2].map((i) => (
                 <motion.div
@@ -945,6 +885,7 @@ export const AuthPage = () => {
         minHeight: "100vh",
       }}
     >
+      {/* Imagem de fundo com desfoque melhorado */}
       <div
         className="absolute inset-0 w-full h-full z-0"
         style={{
@@ -959,8 +900,10 @@ export const AuthPage = () => {
         }}
       />
 
+      {/* Overlay escuro melhorado para legibilidade */}
       <div className="absolute inset-0 bg-black/25 z-[1]" />
 
+      {/* Efeito de glow de fundo durante a animação */}
       <motion.div
         className="absolute inset-0 pointer-events-none"
         initial={{ opacity: 0 }}
@@ -974,6 +917,7 @@ export const AuthPage = () => {
         }}
       />
 
+      {/* Container do card - versão melhorada do visual antigo */}
       <motion.div
         className={cn(
           "relative z-10 flex items-center justify-center border border-orange-900/30 overflow-hidden transition-all duration-300",
@@ -1003,6 +947,7 @@ export const AuthPage = () => {
           minHeight: "auto",
         }}
       >
+        {/* Efeito de textura sutil melhorado */}
         <div
           className="absolute inset-0 pointer-events-none z-0"
           style={{
@@ -1016,6 +961,7 @@ export const AuthPage = () => {
             opacity: 0.5,
           }}
         />
+        {/* Foguete dentro do círculo */}
         <AnimatePresence>
           {showRocket && (
             <motion.div
@@ -1038,6 +984,7 @@ export const AuthPage = () => {
           )}
         </AnimatePresence>
 
+        {/* Conteúdo do formulário - aparece com fade in suave */}
         <motion.div
           className="flex flex-col md:flex-row w-full"
           initial={{ opacity: 1 }}
@@ -1047,8 +994,10 @@ export const AuthPage = () => {
           transition={{ duration: 0, delay: 0, ease: [0.22, 1, 0.36, 1] }}
         >
           <div className="flex-1 relative p-8 md:p-12 lg:p-16">
+            {/* Conteúdo do formulário */}
             <div className="w-full z-10">
               <div className="flex flex-col">
+                {/* Seção superior do Motorista - aparece apenas na aba driver */}
                 {activeTab === "driver" && (
                   <motion.div
                     initial={{ opacity: 0, y: -20 }}
@@ -1064,6 +1013,7 @@ export const AuthPage = () => {
                         "linear-gradient(to bottom, #000000 0%, #1a1a1a 100%)",
                     }}
                   >
+                    {/* Data e hora do Brasil no topo */}
                     <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-4 pb-4 border-b border-orange-900/20">
                       <div className="flex flex-col gap-1">
                         <div className="flex items-center gap-2 text-white">
@@ -1084,7 +1034,9 @@ export const AuthPage = () => {
                       </div>
                     </div>
 
+                    {/* Informações do perfil */}
                     <div className="flex items-center gap-4">
+                      {/* Foto de perfil */}
                       <div className="relative flex-shrink-0">
                         {driverProfile?.avatar ? (
                           <img
@@ -1116,6 +1068,7 @@ export const AuthPage = () => {
                         </div>
                       </div>
 
+                      {/* Nome e cidade */}
                       <div className="flex flex-col flex-1 min-w-0">
                         <h3 className="text-lg md:text-xl font-bold text-white mb-1 truncate">
                           {driverProfile?.name || "Motorista"}
@@ -1134,6 +1087,7 @@ export const AuthPage = () => {
                   </motion.div>
                 )}
 
+                {/* Seção superior do Admin - aparece apenas na aba admin */}
                 {activeTab === "admin" && (
                   <motion.div
                     initial={{ opacity: 0, y: -20 }}
@@ -1149,6 +1103,7 @@ export const AuthPage = () => {
                         "linear-gradient(to bottom, #000000 0%, #1a1a1a 100%)",
                     }}
                   >
+                    {/* Data e hora do Brasil no topo */}
                     <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-4 pb-4 border-b border-orange-900/20">
                       <div className="flex flex-col gap-1">
                         <div className="flex items-center gap-2 text-white">
@@ -1169,7 +1124,9 @@ export const AuthPage = () => {
                       </div>
                     </div>
 
+                    {/* Informações do perfil */}
                     <div className="flex items-center gap-4">
+                      {/* Foto de perfil */}
                       <div className="relative flex-shrink-0">
                         {adminProfile?.avatar ? (
                           <img
@@ -1201,6 +1158,7 @@ export const AuthPage = () => {
                         </div>
                       </div>
 
+                      {/* Nome e cidade */}
                       <div className="flex flex-col flex-1 min-w-0">
                         <h3 className="text-lg md:text-xl font-bold text-white mb-1 truncate">
                           {adminProfile?.name || "Admin Shopee"}
@@ -1221,6 +1179,7 @@ export const AuthPage = () => {
 
                 <div className="flex flex-col border-b border-border">
                   <div className="mb-6">
+                    {/* Logo Shopee Xpress em texto - largura total e maior */}
                     <div className="flex items-baseline justify-center w-full">
                       <span
                         className="text-5xl md:text-6xl lg:text-7xl font-bold italic"
@@ -1404,6 +1363,7 @@ export const AuthPage = () => {
                         </button>
                       </div>
 
+                      {/* Botão Esqueci minha senha */}
                       <div className="flex justify-end -mt-2">
                         <button
                           type="button"
@@ -1668,6 +1628,7 @@ export const AuthPage = () => {
             </div>
           </div>
 
+          {/* Imagem lateral com formato arredondado interno - melhorada */}
           <motion.div
             className="hidden md:block w-[42%] relative m-4 overflow-hidden flex-shrink-0"
             initial={{ opacity: 0, scale: 0.9 }}
@@ -1700,6 +1661,7 @@ export const AuthPage = () => {
         </motion.div>
       </motion.div>
 
+      {/* Assinatura do desenvolvedor no rodapé */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -1773,6 +1735,7 @@ export const AuthPage = () => {
         </div>
       </motion.div>
 
+      {/* Modal de Recuperação de Senha */}
       <AnimatePresence>
         {showRecoverModal && (
           <motion.div
@@ -1796,6 +1759,7 @@ export const AuthPage = () => {
                   "0 25px 50px -12px rgba(249, 115, 22, 0.4), inset 0 1px 0 0 rgba(249, 115, 22, 0.1)",
               }}
             >
+              {/* Header */}
               <div className="flex items-center justify-between p-6 border-b border-orange-500/30">
                 <div className="flex items-center gap-3">
                   <div className="p-2 rounded-xl bg-orange-500/20 border border-orange-500/30">
@@ -1818,7 +1782,9 @@ export const AuthPage = () => {
                 </button>
               </div>
 
+              {/* Body */}
               <form onSubmit={handlePasswordRecovery} className="p-6 space-y-6">
+                {/* Input de E-mail */}
                 <div className="relative">
                   <Mail
                     className="absolute left-4 top-1/2 -translate-y-1/2 text-orange-400/60"
@@ -1839,6 +1805,7 @@ export const AuthPage = () => {
                   />
                 </div>
 
+                {/* Mensagens de erro e sucesso */}
                 {recoverError && (
                   <motion.div
                     initial={{ opacity: 0, y: -10 }}
@@ -1879,6 +1846,7 @@ export const AuthPage = () => {
                   </motion.div>
                 )}
 
+                {/* Botões */}
                 <div className="flex gap-3">
                   <button
                     type="button"
