@@ -15,6 +15,7 @@ export default defineConfig({
       input: {
         main: path.resolve(__dirname, "index.html"),
         landing: path.resolve(__dirname, "landing.html"),
+        store: path.resolve(__dirname, "store.html"),
       },
     },
   },

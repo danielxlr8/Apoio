@@ -81,6 +81,17 @@ module.exports = {
           800: "#901B12",
           900: "#751912",
         },
+        // Cores do Coritiba - Verde e Branco
+        coritiba: {
+          green: {
+            DEFAULT: "#006837",
+            light: "#00873F",
+            dark: "#004D29",
+          },
+          white: "#FFFFFF",
+        },
+        "coritiba-green": "#006837",
+        "coritiba-green-dark": "#004D29",
       },
       borderRadius: {
         lg: "var(--radius)",
