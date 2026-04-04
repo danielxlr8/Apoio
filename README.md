@@ -86,3 +86,6 @@ cd sistema-logistico
 # Instale as dependências
 npm install
 ```
+
+Vídeo de demonstração.
+https://www.youtube.com/watch?v=Jksy6oAjyhs
